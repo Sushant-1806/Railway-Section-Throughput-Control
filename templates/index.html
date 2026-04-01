@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Railway Traffic Control System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            font-size: clamp(1.5rem, 4vw, 2.5rem);
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            font-size: clamp(0.9rem, 2vw, 1.1rem);
+            opacity: 0.9;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        @media (min-width: 1024px) {
+            .main-content {
+                grid-template-columns: 2fr 1fr;
+            }
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 25px;
+            color: #333;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .card h2 {
+            color: #1e3c72;
+            margin-bottom: 20px;
+            font-size: clamp(1.2rem, 3vw, 1.5rem);
+            border-bottom: 3px solid #2a5298;
+            padding-bottom: 10px;
+        }
+
+        .scenario-selector {
+            margin-bottom: 20px;
+        }
+
+        select,
+        button,
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border: 2px solid #2a5298;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: all 0.3s;
+        }
+
+        select:focus,
+        input:focus {
+            outline: none;
+            border-color: #1e3c72;
+            box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.2);
+        }
+
+        button {
+            background: #2a5298;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        button:hover {
+            background: #1e3c72;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .train-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .train-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s;
+        }
+
+        .train-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .train-card.conflict {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+            }
+
+            50% {
+                box-shadow: 0 4px 25px rgba(245, 87, 108, 0.8);
+            }
+        }
+
+        .train-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .train-id {
+            font-size: 1.4rem;
+            font-weight: bold;
+        }
+
+        .train-type {
+            background: rgba(255, 255, 255, 0.3);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+        }
+
+        .train-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 0.9rem;
+        }
+
+        .info-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .info-label {
+            opacity: 0.8;
+            font-size: 0.8rem;
+            margin-bottom: 3px;
+        }
+
+        .info-value {
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .solutions-panel {
+            margin-top: 20px;
+        }
+
+        .solution-card {
+            background: #f8f9fa;
+            border-left: 4px solid #2a5298;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .solution-card:hover {
+            background: #e9ecef;
+            border-left-color: #1e3c72;
+            transform: translateX(5px);
+        }
+
+        .solution-card.selected {
+            background: #d1ecf1;
+            border-left-color: #0c5460;
+        }
+
+        .solution-priority {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .priority-high {
+            background: #ff4444;
+            color: white;
+        }
+
+        .priority-medium {
+            background: #ffaa00;
+            color: white;
+        }
+
+        .priority-low {
+            background: #00C851;
+            color: white;
+        }
+
+        .solution-description {
+            margin: 10px 0;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .solution-actions {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 8px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .status-active {
+            background: #00C851;
+            animation: blink 2s infinite;
+        }
+
+        .status-conflict {
+            background: #ff4444;
+        }
+
+        .status-resolved {
+            background: #33b5e5;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2rem;
+            color: #2a5298;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 100px;
+            height: 100px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            max-width: 600px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            color: #1e3c72;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 2rem;
+            cursor: pointer;
+            color: #999;
+            padding: 0;
+            width: auto;
+            margin: 0;
+        }
+
+        .close-btn:hover {
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .train-form-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border: 2px solid #dee2e6;
+        }
+
+        .train-form-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .remove-train-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 5px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            width: auto;
+            margin: 0;
+        }
+
+        .add-train-btn {
+            background: #28a745;
+            margin-bottom: 15px;
+        }
+
+        @media (max-width: 768px) {
+            .train-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .train-info {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🚂 Railway Traffic Control System</h1>
+            <p class="subtitle">AI-Powered Precise Train Traffic Control - SIH 2025</p>
+        </header>
+
+        <div class="main-content">
+            <div class="dashboard-section">
+                <div class="card">
+                    <h2>📊 Traffic Dashboard</h2>
+
+                    <div class="scenario-selector">
+                        <label for="scenarioSelect"
+                            style="color: #333; font-weight: 500; display: block; margin-bottom: 8px;">
+                            Select Scenario:
+                        </label>
+                        <select id="scenarioSelect">
+                            <option value="">-- Choose a scenario --</option>
+                        </select>
+                        <button onclick="loadScenario()">Load Scenario</button>
+                        <button onclick="openCreateModal()" style="background: #28a745;">Create Custom Scenario</button>
+                        <button onclick="analyzeTraffic()" id="analyzeBtn" disabled>🤖 Analyze with AI</button>
+                    </div>
+
+                    <div id="trainsContainer">
+                        <div class="empty-state">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2">
+                                </path>
+                            </svg>
+                            <p>Select a scenario to view train data</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="solutions-section">
+                <div class="card">
+                    <h2>💡 AI Solutions</h2>
+                    <div id="solutionsContainer">
+                        <div class="empty-state">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z">
+                                </path>
+                            </svg>
+                            <p>Click "Analyze with AI" to get solutions</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Scenario Modal -->
+    <div id="createModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Create Custom Scenario</h2>
+                <button class="close-btn" onclick="closeCreateModal()">&times;</button>
+            </div>
+
+            <form id="scenarioForm" onsubmit="createScenario(event)">
+                <div class="form-group">
+                    <label>Scenario Name:</label>
+                    <input type="text" id="scenarioName" required placeholder="e.g., Rush Hour Traffic">
+                </div>
+
+                <div class="form-group">
+                    <label>Description:</label>
+                    <input type="text" id="scenarioDescription" placeholder="Brief description of the scenario">
+                </div>
+
+                <h3 style="color: #1e3c72; margin: 20px 0 10px 0;">Trains</h3>
+                <div id="trainsFormContainer"></div>
+
+                <button type="button" class="add-train-btn" onclick="addTrainForm()">+ Add Train</button>
+
+                <button type="submit" style="margin-top: 20px;">Create Scenario</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000/api';
+        let currentTrains = [];
+        let currentScenarioId = null;
+        let selectedSolution = null;
+        let trainFormCount = 0;
+
+        // Load scenarios on page load
+        window.addEventListener('DOMContentLoaded', loadScenarios);
+
+        async function loadScenarios() {
+            try {
+                const response = await fetch(`${API_URL}/scenarios`);
+                const scenarios = await response.json();
+
+                const select = document.getElementById('scenarioSelect');
+                select.innerHTML = '<option value="">-- Choose a scenario --</option>';
+
+                scenarios.forEach(scenario => {
+                    const option = document.createElement('option');
+                    option.value = scenario.scenario_id;
+                    option.textContent = scenario.name;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading scenarios:', error);
+                alert('Error loading scenarios. Make sure the backend server is running!');
+            }
+        }
+
+        async function loadScenario() {
+            const scenarioId = document.getElementById('scenarioSelect').value;
+
+            if (!scenarioId) {
+                alert('Please select a scenario first!');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/scenario/${scenarioId}`);
+                const data = await response.json();
+
+                currentTrains = data.trains;
+                currentScenarioId = scenarioId;
+
+                displayTrains(currentTrains);
+
+                document.getElementById('analyzeBtn').disabled = false;
+                document.getElementById('solutionsContainer').innerHTML = `
+                    <div class="empty-state">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                        </svg>
+                        <p>Click "Analyze with AI" to get solutions</p>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading scenario:', error);
+                alert('Error loading scenario data!');
+            }
+        }
+
+        function displayTrains(trains) {
+            const container = document.getElementById('trainsContainer');
+
+            if (trains.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <p>No trains in this scenario</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = `<div class="train-grid"></div>`;
+            const grid = container.querySelector('.train-grid');
+
+            trains.forEach(train => {
+                const trainCard = document.createElement('div');
+                trainCard.className = 'train-card';
+                trainCard.id = `train-${train.train_id}`;
+
+                trainCard.innerHTML = `
+                    <div class="train-header">
+                        <div class="train-id">${train.train_id}</div>
+                        <div class="train-type">${train.train_type}</div>
+                    </div>
+                    <div class="train-info">
+                        <div class="info-item">
+                            <span class="info-label">Speed</span>
+                            <span class="info-value">${train.current_speed} km/h</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Priority</span>
+                            <span class="info-value">Level ${train.priority}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Section</span>
+                            <span class="info-value">${train.current_section}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Distance</span>
+                            <span class="info-value">${train.distance_to_destination} km</span>
+                        </div>
+                    </div>
+                    <div style="margin-top: 15px; font-size: 0.9rem;">
+                        <span class="status-indicator status-${train.status || 'active'}"></span>
+                        <strong>Destination:</strong> ${train.destination}
+                    </div>
+                `;
+
+                grid.appendChild(trainCard);
+            });
+        }
+
+        async function analyzeTraffic() {
+            if (currentTrains.length === 0) {
+                alert('No trains to analyze!');
+                return;
+            }
+
+            document.getElementById('solutionsContainer').innerHTML = '<div class="loading">🤖 AI analyzing traffic patterns...</div>';
+
+            try {
+                const response = await fetch(`${API_URL}/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ trains: currentTrains })
+                });
+
+                const data = await response.json();
+                displaySolutions(data.solutions, data.conflicts);
+
+                // Highlight conflicting trains
+                if (data.conflicts && data.conflicts.length > 0) {
+                    data.conflicts.forEach(conflict => {
+                        conflict.trains.forEach(trainId => {
+                            const trainCard = document.getElementById(`train-${trainId}`);
+                            if (trainCard) {
+                                trainCard.classList.add('conflict');
+                            }
+                        });
+                    });
+                }
+            } catch (error) {
+                console.error('Error analyzing traffic:', error);
+                alert('Error analyzing traffic!');
+            }
+        }
+
+        function displaySolutions(solutions, conflicts) {
+            const container = document.getElementById('solutionsContainer');
+
+            if (solutions.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <p>No solutions available</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = '<div class="solutions-panel"></div>';
+            const panel = container.querySelector('.solutions-panel');
+
+            if (conflicts && conflicts.length > 0) {
+                const conflictInfo = document.createElement('div');
+                conflictInfo.style.cssText = 'background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin-bottom: 15px; border-radius: 8px; color: #856404;';
+                conflictInfo.innerHTML = `<strong>⚠️ ${conflicts.length} Conflict(s) Detected</strong>`;
+                panel.appendChild(conflictInfo);
+            }
+
+            solutions.forEach(solution => {
+                const solutionCard = document.createElement('div');
+                solutionCard.className = 'solution-card';
+                solutionCard.onclick = () => selectSolution(solution);
+
+                const actionsText = solution.actions.length > 0
+                    ? solution.actions.map(a => `• ${a.train_id}: ${a.action}`).join('<br>')
+                    : 'No actions required';
+
+                solutionCard.innerHTML = `
+                    <span class="solution-priority priority-${solution.priority}">${solution.priority.toUpperCase()}</span>
+                    <div class="solution-description">${solution.description}</div>
+                    <div class="solution-actions">${actionsText}</div>
+                `;
+
+                panel.appendChild(solutionCard);
+            });
+
+            const applyBtn = document.createElement('button');
+            applyBtn.textContent = 'Apply Selected Solution';
+            applyBtn.onclick = applySolution;
+            applyBtn.style.marginTop = '20px';
+            panel.appendChild(applyBtn);
+        }
+
+        function selectSolution(solution) {
+            document.querySelectorAll('.solution-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            event.currentTarget.classList.add('selected');
+            selectedSolution = solution;
+        }
+
+        async function applySolution() {
+            if (!selectedSolution) {
+                alert('Please select a solution first!');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/apply-solution`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        solution: selectedSolution,
+                        trains: currentTrains
+                    })
+                });
+
+                const data = await response.json();
+                currentTrains = data.trains;
+
+                displayTrains(currentTrains);
+
+                alert('✅ Solution applied successfully!');
+
+                // Clear solutions and re-analyze
+                setTimeout(() => {
+                    analyzeTraffic();
+                }, 1000);
+            } catch (error) {
+                console.error('Error applying solution:', error);
+                alert('Error applying solution!');
+            }
+        }
+
+        function openCreateModal() {
+            document.getElementById('createModal').classList.add('active');
+            trainFormCount = 0;
+            document.getElementById('trainsFormContainer').innerHTML = '';
+            addTrainForm();
+            addTrainForm();
+        }
+
+        function closeCreateModal() {
+            document.getElementById('createModal').classList.remove('active');
+            document.getElementById('scenarioForm').reset();
+        }
+
+        function addTrainForm() {
+            trainFormCount++;
+            const container = document.getElementById('trainsFormContainer');
+
+            const trainForm = document.createElement('div');
+            trainForm.className = 'train-form-card';
+            trainForm.id = `trainForm${trainFormCount}`;
+
+            trainForm.innerHTML = `
+                <div class="train-form-header">
+                    <strong>Train ${trainFormCount}</strong>
+                    <button type="button" class="remove-train-btn" onclick="removeTrainForm(${trainFormCount})">Remove</button>
+                </div>
+                <input type="text" placeholder="Train ID (e.g., T101)" name="trainId${trainFormCount}" required>
+                <select name="trainType${trainFormCount}" required>
+                    <option value="">-- Select Type --</option>
+                    <option value="Express">Express</option>
+                    <option value="Passenger">Passenger</option>
+                    <option value="Freight">Freight</option>
+                    <option value="Local">Local</option>
+                </select>
+                <input type="number" placeholder="Priority (1-5, lower is higher)" name="priority${trainFormCount}" min="1" max="5" required>
+                <input type="number" placeholder="Speed (km/h)" name="speed${trainFormCount}" min="0" max="200" required>
+                <input type="text" placeholder="Section (e.g., Section A)" name="section${trainFormCount}" required>
+                <input type="text" placeholder="Destination" name="destination${trainFormCount}" required>
+                <input type="number" placeholder="Distance (km)" name="distance${trainFormCount}" min="1" required>
+            `;
+
+            container.appendChild(trainForm);
+        }
+
+        function removeTrainForm(formId) {
+            const form = document.getElementById(`trainForm${formId}`);
+            if (form) {
+                form.remove();
+            }
+        }
+
+        async function createScenario(event) {
+            event.preventDefault();
+
+            const name = document.getElementById('scenarioName').value;
+            const description = document.getElementById('scenarioDescription').value;
+
+            const trains = [];
+            const container = document.getElementById('trainsFormContainer');
+            const trainForms = container.querySelectorAll('.train-form-card');
+
+            trainForms.forEach((form, index) => {
+                const formId = form.id.replace('trainForm', '');
+                trains.push({
+                    train_id: document.querySelector(`[name="trainId${formId}"]`).value,
+                    train_type: document.querySelector(`[name="trainType${formId}"]`).value,
+                    priority: parseInt(document.querySelector(`[name="priority${formId}"]`).value),
+                    current_speed: parseInt(document.querySelector(`[name="speed${formId}"]`).value),
+                    current_section: document.querySelector(`[name="section${formId}"]`).value,
+                    destination: document.querySelector(`[name="destination${formId}"]`).value,
+                    distance_to_destination: parseInt(document.querySelector(`[name="distance${formId}"]`).value)
+                });
+            });
+
+            try {
+                const response = await fetch(`${API_URL}/scenario`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description, trains })
+                });
+
+                const data = await response.json();
+                alert('✅ Scenario created successfully!');
+                closeCreateModal();
+                await loadScenarios();
+
+                // Auto-select the new scenario
+                document.getElementById('scenarioSelect').value = data.scenario_id;
+                loadScenario();
+            } catch (error) {
+                console.error('Error creating scenario:', error);
+                alert('Error creating scenario!');
+            }
+        }
+    </script>
+</body>
+
+</html>
