@@ -1,13 +1,13 @@
 # Railway Control
 
-Railway Control is a full-stack railway operations demo for monitoring trains, detecting section conflicts, and applying control actions in real time.
+Railway Control is a full-stack railway operations dashboard for monitoring train movement, analyzing section conflicts, and applying control actions in real time.
 
-It combines a Flask API, Socket.IO updates, a React frontend, and PostgreSQL-backed scenario data so operators can inspect traffic, review AI analysis, and test mitigation strategies on a live track map.
+It combines a Flask API, Socket.IO updates, a React frontend, and PostgreSQL-backed scenario data so operators can inspect traffic, review AI recommendations, and watch a live animated track map.
 
 ## Features
 
 - Real-time train movement and conflict updates over Socket.IO.
-- Dark and light theme support in the UI.
+- Dark and light theme support.
 - Authentication with seeded admin and operator users.
 - Scenario management with five built-in sample scenarios.
 - AI-assisted conflict analysis and solution application.
@@ -33,7 +33,7 @@ Sample scenarios are protected from deletion in the UI and API.
 - Frontend: React, Vite, Zustand, Socket.IO client
 - Deployment: Gunicorn and Nginx in Docker
 
-## Recommended Run Path
+## Quick Start
 
 Docker is the simplest way to run the project:
 
@@ -47,7 +47,7 @@ This starts:
 - Backend API on port `5000`
 - Frontend on port `3000`
 
-The API container bootstraps the database schema and seeds the demo data automatically, so no manual database setup is required for Docker.
+The API container bootstraps the database schema and seeds the demo data automatically, so no manual database setup is required when running through Docker.
 
 Open the app at `http://localhost:3000`.
 
@@ -55,9 +55,11 @@ Open the app at `http://localhost:3000`.
 
 ### Backend
 
-```bash
+PowerShell:
+
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 $env:SOCKETIO_ASYNC_MODE = 'threading'
 python setup_database.py
@@ -66,7 +68,7 @@ python run.py
 
 The API runs on `http://localhost:5000`.
 
-If you are on a non-Windows shell, set `SOCKETIO_ASYNC_MODE=threading` with your shell's environment syntax before starting the backend.
+If you are using a non-Windows shell, set `SOCKETIO_ASYNC_MODE=threading` with your shell's environment syntax before starting the backend.
 
 ### Frontend
 
