@@ -115,4 +115,3 @@ npm run build
 
 - The backend uses `SOCKETIO_ASYNC_MODE=threading` for local Python startup.
 - Logs are written to the `logs/` directory.
-- Sample scenarios are recreated automatically when Docker starts the API container.
