@@ -71,7 +71,7 @@ export default function ScenarioModal({ onClose, onCreated }) {
           <button className="modal-close" onClick={onClose}><X size={20}/></button>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form className="modal-form" onSubmit={handleSubmit}>
           <div className="modal-body">
             <div className="form-group">
               <label className="form-label">Scenario Name *</label>

@@ -649,6 +649,13 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
+.modal-form {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -671,6 +678,7 @@ body {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--border-light) transparent;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal-footer {
