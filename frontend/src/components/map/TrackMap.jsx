@@ -11,6 +11,11 @@ import useRailwayStore from '../../store/railwayStore'
 
 const MAP_W = 900
 const MAP_H = 560
+const VISUAL_TIME_SCALE = 1800
+const MIN_VISUAL_DURATION = 3
+const MAX_VISUAL_DURATION = 12
+const TRAIL_MIN = 18
+const TRAIL_MAX = 36
 
 const TYPE_COLORS = {
   Express:   '#3b82f6',
@@ -28,9 +33,166 @@ const STATUS_STROKE = {
   arrived:       '#10b981',
 }
 
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+
+function buildAdjacency(edges) {
+  const adjacency = new Map()
+  edges.forEach((edge) => {
+    if (!adjacency.has(edge.from)) adjacency.set(edge.from, [])
+    adjacency.get(edge.from).push({ to: edge.to, distance: Number(edge.distance) || 1 })
+  })
+  return adjacency
+}
+
+function buildEdgeLookup(edges) {
+  const lookup = new Map()
+  edges.forEach((edge) => {
+    lookup.set(`${edge.from}->${edge.to}`, edge)
+  })
+  return lookup
+}
+
+function shortestPath(source, target, adjacency) {
+  if (!source || !target) return []
+  if (source === target) return [source]
+
+  const distances = new Map([[source, 0]])
+  const previous = new Map()
+  const queue = [[0, source]]
+  const visited = new Set()
+
+  while (queue.length > 0) {
+    queue.sort((a, b) => a[0] - b[0])
+    const [distance, node] = queue.shift()
+    if (visited.has(node)) continue
+    visited.add(node)
+
+    if (node === target) break
+
+    const neighbors = adjacency.get(node) || []
+    neighbors.forEach(({ to, distance: segmentDistance }) => {
+      const nextDistance = distance + segmentDistance
+      if (nextDistance < (distances.get(to) ?? Infinity)) {
+        distances.set(to, nextDistance)
+        previous.set(to, node)
+        queue.push([nextDistance, to])
+      }
+    })
+  }
+
+  if (!distances.has(target)) return []
+
+  const path = [target]
+  while (path[0] !== source) {
+    const previousNode = previous.get(path[0])
+    if (!previousNode) return []
+    path.unshift(previousNode)
+  }
+  return path
+}
+
+function buildGeometry(path, nodeMap, edgeLookup) {
+  const fallback = path.length > 0 && nodeMap[path[0]]
+    ? { x: nodeMap[path[0]].x, y: nodeMap[path[0]].y }
+    : { x: MAP_W / 2, y: MAP_H / 2 }
+
+  if (path.length < 2) {
+    return { nodes: path, segments: [], totalDistance: 0, fallback }
+  }
+
+  const segments = []
+  let totalDistance = 0
+
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const fromNode = nodeMap[path[index]]
+    const toNode = nodeMap[path[index + 1]]
+    if (!fromNode || !toNode) continue
+
+    const edge = edgeLookup.get(`${path[index]}->${path[index + 1]}`)
+    const distance = Number(edge?.distance) || Math.max(1, Math.hypot(toNode.x - fromNode.x, toNode.y - fromNode.y) / 10)
+
+    segments.push({
+      from: fromNode,
+      to: toNode,
+      distance,
+      start: totalDistance,
+      end: totalDistance + distance,
+    })
+
+    totalDistance += distance
+  }
+
+  return { nodes: path, segments, totalDistance, fallback }
+}
+
+function pointAtDistance(geometry, distance) {
+  if (geometry.segments.length === 0 || geometry.totalDistance <= 0) {
+    return { x: geometry.fallback.x, y: geometry.fallback.y, angle: 0 }
+  }
+
+  const clampedDistance = clamp(distance, 0, geometry.totalDistance)
+  const segment = geometry.segments.find((entry) => clampedDistance <= entry.end) || geometry.segments[geometry.segments.length - 1]
+  const localDistance = clampedDistance - segment.start
+  const ratio = segment.distance <= 0 ? 1 : clamp(localDistance / segment.distance, 0, 1)
+  const x = segment.from.x + (segment.to.x - segment.from.x) * ratio
+  const y = segment.from.y + (segment.to.y - segment.from.y) * ratio
+  const angle = Math.atan2(segment.to.y - segment.from.y, segment.to.x - segment.from.x) * 180 / Math.PI
+
+  return { x, y, angle }
+}
+
+function getTrainSignature(train) {
+  return [
+    train.current_section,
+    train.destination,
+    train.current_speed,
+    train.status,
+    train.direction || 'forward',
+  ].join('|')
+}
+
+function getVisualDuration(train, geometry) {
+  const speed = Math.max(Number(train.current_speed) || 0, 1)
+  const travelDistance = Math.max(
+    Number(train.distance_to_destination) || 0,
+    geometry.totalDistance || 0,
+    1,
+  )
+  const etaSeconds = (travelDistance / speed) * 3600
+  return clamp(etaSeconds / VISUAL_TIME_SCALE, MIN_VISUAL_DURATION, MAX_VISUAL_DURATION)
+}
+
+function getConflictAnchor(conflict, nodeMap) {
+  if (!conflict?.section) return null
+
+  if (conflict.section.includes('-')) {
+    const [from, to] = conflict.section.split('-')
+    const fromNode = nodeMap[from]
+    const toNode = nodeMap[to]
+    if (fromNode && toNode) {
+      return { x: (fromNode.x + toNode.x) / 2, y: (fromNode.y + toNode.y) / 2 }
+    }
+  }
+
+  const node = nodeMap[conflict.section]
+  if (!node) return null
+  return { x: node.x, y: node.y }
+}
+
 export default function TrackMap() {
   const svgRef = useRef(null)
-  const { networkNodes, networkEdges, currentTrains, conflicts } = useRailwayStore()
+  const trainLayerRef = useRef(null)
+  const conflictLayerRef = useRef(null)
+  const motionRef = useRef(new Map())
+  const pathCacheRef = useRef(new Map())
+  const currentTrainsRef = useRef([])
+  const conflictIdsRef = useRef(new Set())
+  const frameRef = useRef(null)
+  const { networkNodes, networkEdges, currentTrains, conflicts, simulationRunning } = useRailwayStore()
+
+  const nodeMap = useMemo(() => Object.fromEntries(networkNodes.map((node) => [node.id, node])), [networkNodes])
+  const adjacency = useMemo(() => buildAdjacency(networkEdges), [networkEdges])
+  const edgeLookup = useMemo(() => buildEdgeLookup(networkEdges), [networkEdges])
 
   // Map of which trains are in conflict (for highlight)
   const conflictTrainIds = useMemo(() => {
@@ -38,6 +200,19 @@ export default function TrackMap() {
     conflicts.forEach((c) => c.trains?.forEach((t) => ids.add(t)))
     return ids
   }, [conflicts])
+
+  useEffect(() => {
+    currentTrainsRef.current = currentTrains
+  }, [currentTrains])
+
+  useEffect(() => {
+    conflictIdsRef.current = conflictTrainIds
+  }, [conflictTrainIds])
+
+  useEffect(() => {
+    motionRef.current = new Map()
+    pathCacheRef.current = new Map()
+  }, [adjacency, edgeLookup])
 
   useEffect(() => {
     if (!svgRef.current || networkNodes.length === 0) return
@@ -169,63 +344,11 @@ export default function TrackMap() {
         .text(node.label)
     })
 
-    // ── Trains ────────────────────────────────────────────────────────────
+    // ── Dynamic Layers ────────────────────────────────────────────────────
+    const conflictLayer = svg.append('g').attr('class', 'conflict-markers')
     const trainGroup = svg.append('g').attr('class', 'trains')
-
-    currentTrains.forEach((train, i) => {
-      const node = nodeMap[train.current_section]
-      if (!node) return
-
-      const isConflict = conflictTrainIds.has(train.train_id)
-      const color = TYPE_COLORS[train.train_type] || '#94a3b8'
-      const strokeColor = isConflict ? '#ef4444' : STATUS_STROKE[train.status] || '#22c55e'
-
-      // Jitter offset so overlapping trains are visible
-      const ox = (i % 3 - 1) * 18
-      const oy = Math.floor(i / 3) * -16
-
-      const g = trainGroup.append('g')
-        .attr('transform', `translate(${node.x + ox},${node.y + oy})`)
-
-      // Glow aura for conflicting trains
-      if (isConflict) {
-        g.append('circle').attr('r', 20)
-          .attr('fill', 'none').attr('stroke', '#ef4444')
-          .attr('stroke-width', 1).attr('opacity', 0.3)
-          .attr('filter', 'url(#glow)')
-          .append('animate')
-            .attr('attributeName', 'r')
-            .attr('values', '16;22;16')
-            .attr('dur', '1.5s').attr('repeatCount', 'indefinite')
-      }
-
-      // Train body
-      g.append('circle').attr('r', 14)
-        .attr('fill', `${color}22`)
-        .attr('stroke', strokeColor)
-        .attr('stroke-width', 2)
-        .attr('filter', 'url(#glow)')
-
-      g.append('circle').attr('r', 9)
-        .attr('fill', color)
-
-      // Train ID text
-      g.append('text')
-        .attr('text-anchor', 'middle').attr('dy', '0.35em')
-        .attr('fill', 'white').attr('font-size', '7px')
-        .attr('font-family', 'JetBrains Mono, monospace')
-        .attr('font-weight', '700')
-        .text(train.train_id.replace('T', ''))
-
-      // Tooltip (title)
-      g.append('title').text(
-        `${train.train_id} (${train.train_type})\n` +
-        `Speed: ${train.current_speed} km/h\n` +
-        `Section: ${train.current_section} → ${train.destination}\n` +
-        `Status: ${train.status}\n` +
-        `Priority: ${train.priority}`
-      )
-    })
+    trainLayerRef.current = trainGroup
+    conflictLayerRef.current = conflictLayer
 
     // ── Legend ─────────────────────────────────────────────────────────────
     const legendGroup = svg.append('g').attr('transform', `translate(16, ${MAP_H - 80})`)
@@ -238,7 +361,180 @@ export default function TrackMap() {
         .text(type)
     })
 
-  }, [networkNodes, networkEdges, currentTrains, conflictTrainIds])
+    const getGeometryForTrain = (train) => {
+      const cacheKey = `${train.current_section}->${train.destination}`
+      const cached = pathCacheRef.current.get(cacheKey)
+      if (cached) return cached
+
+      const path = shortestPath(train.current_section, train.destination, adjacency)
+      const geometry = buildGeometry(path, nodeMap, edgeLookup)
+      pathCacheRef.current.set(cacheKey, geometry)
+      return geometry
+    }
+
+    const renderFrame = (now) => {
+      const liveTrains = currentTrainsRef.current
+      const conflictIds = conflictIdsRef.current
+
+      const renderedTrains = liveTrains.map((train, index) => {
+        const signature = getTrainSignature(train)
+        let motion = motionRef.current.get(train.train_id)
+
+        if (!motion || motion.signature !== signature) {
+          const geometry = getGeometryForTrain(train)
+          const durationMs = getVisualDuration(train, geometry) * 1000
+          motion = {
+            signature,
+            geometry,
+            durationMs,
+            startTime: now,
+          }
+          motionRef.current.set(train.train_id, motion)
+        }
+
+        const geometry = motion.geometry
+        const status = train.status || 'active'
+        const isStopped = status === 'stopped' || status === 'arrived' || Number(train.current_speed) <= 0
+        const totalDistance = geometry.totalDistance || 0
+        const shouldAnimate = simulationRunning && totalDistance > 0 && !isStopped
+
+        let travelled = 0
+        if (status === 'arrived') {
+          travelled = totalDistance
+        } else if (shouldAnimate && Number.isFinite(motion.durationMs) && motion.durationMs > 0) {
+          travelled = clamp((now - motion.startTime) / motion.durationMs, 0, 1) * totalDistance
+        }
+
+        const trailDistance = Math.max(0, travelled - clamp(totalDistance * 0.08, TRAIL_MIN, TRAIL_MAX))
+        const position = pointAtDistance(geometry, travelled)
+        const trailPosition = pointAtDistance(geometry, trailDistance)
+        const conflict = conflictIds.has(train.train_id)
+        const color = TYPE_COLORS[train.train_type] || '#94a3b8'
+        const strokeColor = conflict ? STATUS_STROKE.conflict : STATUS_STROKE[status] || STATUS_STROKE.active
+        const auraOpacity = conflict ? 0.42 + 0.18 * Math.sin(now / 180 + index) : 0.18 + 0.08 * Math.sin(now / 520 + index)
+
+        return {
+          ...train,
+          x: position.x,
+          y: position.y,
+          trailX: trailPosition.x,
+          trailY: trailPosition.y,
+          color,
+          strokeColor,
+          auraOpacity,
+          isConflict: conflict,
+        }
+      })
+
+      const trainSelection = trainGroup.selectAll('g.train-group').data(renderedTrains, (d) => d.train_id)
+      const trainEnter = trainSelection.enter().append('g').attr('class', 'train-group')
+
+      trainEnter.append('line').attr('class', 'train-trail')
+      trainEnter.append('circle').attr('class', 'train-aura').attr('r', 17).attr('fill', 'none').attr('stroke-width', 2)
+      trainEnter.append('circle').attr('class', 'train-body').attr('r', 12)
+      trainEnter.append('circle').attr('class', 'train-core').attr('r', 7)
+      trainEnter.append('title')
+
+      const trainMerged = trainEnter.merge(trainSelection)
+      trainMerged.attr('transform', (d) => `translate(${d.x},${d.y})`)
+
+      trainMerged.select('line.train-trail')
+        .attr('x1', (d) => d.trailX - d.x)
+        .attr('y1', (d) => d.trailY - d.y)
+        .attr('x2', 0)
+        .attr('y2', 0)
+        .attr('stroke', (d) => d.color)
+        .attr('stroke-opacity', (d) => d.isConflict ? 0.72 : 0.5)
+        .attr('stroke-width', (d) => d.isConflict ? 4 : 3)
+
+      trainMerged.select('circle.train-aura')
+        .attr('stroke', (d) => d.isConflict ? '#ef4444' : d.color)
+        .attr('opacity', (d) => d.auraOpacity)
+        .attr('filter', 'url(#glow)')
+
+      trainMerged.select('circle.train-body')
+        .attr('fill', (d) => d.color)
+        .attr('fill-opacity', (d) => d.status === 'arrived' ? 0.2 : d.status === 'stopped' ? 0.14 : 0.22)
+        .attr('stroke', (d) => d.strokeColor)
+        .attr('stroke-width', 2)
+        .attr('filter', 'url(#glow)')
+
+      trainMerged.select('circle.train-core')
+        .attr('fill', (d) => d.color)
+
+      trainMerged.select('title').text((d) => (
+        `${d.train_id} (${d.train_type})\n`
+        + `Speed: ${d.current_speed} km/h\n`
+        + `Section: ${d.current_section} → ${d.destination}\n`
+        + `Status: ${d.status}\n`
+        + `Priority: ${d.priority}`
+      ))
+
+      trainSelection.exit().remove()
+
+      const renderedConflicts = (conflictsRef.current || [])
+        .map((conflict, index) => {
+          const anchor = getConflictAnchor(conflict, nodeMap)
+          if (!anchor) return null
+
+          const severity = conflict.severity || 'medium'
+          const baseRadius = severity === 'critical' ? 16 : severity === 'high' ? 14 : 12
+
+          return {
+            ...conflict,
+            key: `${conflict.conflict_id}-${conflict.section}`,
+            x: anchor.x,
+            y: anchor.y,
+            severity,
+            baseRadius,
+            pulse: Math.sin(now / 220 + index),
+          }
+        })
+        .filter(Boolean)
+
+      const conflictSelection = conflictLayer.selectAll('g.conflict-marker').data(renderedConflicts, (d) => d.key)
+      const conflictEnter = conflictSelection.enter().append('g').attr('class', 'conflict-marker')
+
+      conflictEnter.append('circle').attr('class', 'conflict-marker-pulse').attr('fill', 'none')
+      conflictEnter.append('circle').attr('class', 'conflict-marker-core').attr('r', 4)
+      conflictEnter.append('title')
+
+      const conflictMerged = conflictEnter.merge(conflictSelection)
+      conflictMerged.attr('transform', (d) => `translate(${d.x},${d.y})`)
+
+      conflictMerged.select('circle.conflict-marker-pulse')
+        .attr('r', (d) => d.baseRadius + 4 + d.pulse * 2)
+        .attr('stroke', (d) => (d.severity === 'critical' ? '#ef4444' : d.severity === 'high' ? '#f59e0b' : '#fb7185'))
+        .attr('opacity', (d) => (d.severity === 'critical' ? 0.58 + 0.12 * Math.sin(now / 140) : 0.48 + 0.1 * Math.sin(now / 160)))
+
+      conflictMerged.select('circle.conflict-marker-core')
+        .attr('fill', (d) => (d.severity === 'critical' ? '#ef4444' : d.severity === 'high' ? '#f59e0b' : '#fb7185'))
+
+      conflictMerged.select('title').text((d) => (
+        `${d.conflict_id} · ${d.type.replace('_', ' ')}\n`
+        + `Section: ${d.section}\n`
+        + `Trains: ${(d.trains || []).join(', ')}\n`
+        + `Severity: ${d.severity}`
+      ))
+
+      conflictSelection.exit().remove()
+
+      frameRef.current = window.requestAnimationFrame(renderFrame)
+    }
+
+    frameRef.current = window.requestAnimationFrame(renderFrame)
+
+    return () => {
+      if (frameRef.current) {
+        window.cancelAnimationFrame(frameRef.current)
+      }
+      frameRef.current = null
+      trainLayerRef.current = null
+      conflictLayerRef.current = null
+      svg.selectAll('*').remove()
+    }
+
+  }, [networkNodes, networkEdges, nodeMap, adjacency, edgeLookup, simulationRunning])
 
   if (networkNodes.length === 0) {
     return (

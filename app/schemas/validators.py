@@ -66,6 +66,7 @@ class AnalyzeRequest(BaseModel):
 class ApplySolutionRequest(BaseModel):
     solution_id: int = Field(..., ge=1)
     trains: list[TrainInput]
+    scenario_id: int | None = Field(None, ge=1)
 
 
 # ── Train update (via websocket or manual) ────────────────────────────────────

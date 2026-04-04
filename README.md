@@ -85,6 +85,8 @@ Run the full stack with Docker Compose:
 docker compose up --build
 ```
 
+The API container boots the database schema and seeds the five built-in sample scenarios automatically, so no manual initialization step is needed for Docker.
+
 This starts:
 
 - PostgreSQL on port `5432`

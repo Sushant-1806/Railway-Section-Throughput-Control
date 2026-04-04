@@ -40,7 +40,12 @@ def create_scenario():
     try:
         body = CreateScenarioRequest.model_validate(request.get_json(force=True) or {})
     except ValidationError as e:
-        return jsonify({"status": "error", "message": e.errors()}), 400
+        errors = []
+        for error in e.errors():
+            cleaned = dict(error)
+            cleaned.pop("ctx", None)
+            errors.append(cleaned)
+        return jsonify({"status": "error", "message": "Invalid scenario payload", "errors": errors}), 400
 
     scenario_id = repo.insert_scenario(body.name, body.description, user_id)
     for train in body.trains:
@@ -52,6 +57,13 @@ def create_scenario():
 @scenarios_bp.delete("/scenario/<int:scenario_id>")
 @jwt_required()
 def delete_scenario(scenario_id: int):
+    scenario = repo.fetch_scenario_by_id(scenario_id)
+    if not scenario:
+        return jsonify({"status": "error", "message": "Scenario not found"}), 404
+
+    if scenario.get("is_sample") or scenario.get("sample_key"):
+        return jsonify({"status": "error", "message": "Sample scenarios cannot be deleted"}), 403
+
     deleted = repo.delete_scenario(scenario_id)
     if not deleted:
         return jsonify({"status": "error", "message": "Scenario not found"}), 404

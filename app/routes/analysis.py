@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from pydantic import ValidationError
 
+from app.db import repository as repo
 from app.schemas.validators import AnalyzeRequest, ApplySolutionRequest
 from app.services import ai_engine
 from app.services.simulator import (
@@ -67,6 +68,11 @@ def apply_solution():
     )
 
     updated = ai_engine.apply_solution(sol, trains_raw)
+
+    if body.scenario_id is not None:
+        for train in updated:
+            repo.update_train_state(body.scenario_id, train["train_id"], train)
+
     return jsonify({"status": "ok", "trains": updated})
 
 
@@ -105,6 +111,7 @@ def manual_override():
     if not scenario_id or not train_id:
         return jsonify({"status": "error", "message": "scenario_id and train_id required"}), 400
     update_train_override(scenario_id, train_id, updates)
+    repo.update_train_state(scenario_id, train_id, updates)
     return jsonify({"status": "ok"})
 
 

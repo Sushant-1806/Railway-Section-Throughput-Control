@@ -47,8 +47,8 @@ export const deleteScenario = (id) => api.delete(`/scenario/${id}`)
 export const analyzeTraffic = (trains, lookahead = 120) =>
   api.post('/analyze', { trains, lookahead_seconds: lookahead })
 
-export const applySolution = (solution_id, trains) =>
-  api.post('/apply-solution', { solution_id, trains })
+export const applySolution = (solution_id, trains, scenario_id = null) =>
+  api.post('/apply-solution', { solution_id, trains, scenario_id })
 
 // ── Simulation ────────────────────────────────────────────────────────────────
 

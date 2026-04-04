@@ -16,4 +16,4 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--worker-class", "gthread", "--threads", "4", "-w", "1", "-b", "0.0.0.0:5000", "run:app"]
+CMD ["sh", "-c", "python setup_database.py && exec gunicorn --worker-class gthread --threads 4 -w 1 -b 0.0.0.0:5000 run:app"]

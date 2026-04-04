@@ -40,4 +40,3 @@ def close_pool() -> None:
     if _pool is not None:
         _pool.close()
         _pool = None
-        logger.info("DB pool closed.")

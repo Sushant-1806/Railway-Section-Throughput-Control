@@ -33,7 +33,10 @@ export default function ScenariosPage() {
       await api.deleteScenario(id)
       setScenarios(scenarios.filter((s) => s.scenario_id !== id))
       toast.success('Scenario deleted')
-    } catch { toast.error('Delete failed') }
+    } catch (err) {
+      const msg = err.response?.data?.message
+      toast.error(typeof msg === 'string' ? msg : 'Delete failed')
+    }
     finally { setDeletingId(null) }
   }
 
@@ -73,12 +76,31 @@ export default function ScenariosPage() {
           {scenarios.map((s) => (
             <div key={s.scenario_id} className="card" style={{ cursor:'pointer' }}>
               <div className="card-header">
-                <div className="card-title">{s.name}</div>
+                <div className="card-title">
+                  {s.name}
+                  {s.is_sample && (
+                    <span style={{
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                      padding: '3px 8px',
+                      borderRadius: 999,
+                      border: '1px solid var(--border)',
+                      color: 'var(--primary)',
+                      background: 'var(--primary-glow)',
+                    }}>
+                      Sample
+                    </span>
+                  )}
+                </div>
                 <div className="flex gap-2">
-                  <button className="btn btn-danger btn-sm" onClick={() => handleDelete(s.scenario_id)}
-                    disabled={deletingId === s.scenario_id}>
-                    <Trash2 size={12}/>
-                  </button>
+                  {!s.is_sample && (
+                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(s.scenario_id)}
+                      disabled={deletingId === s.scenario_id}>
+                      <Trash2 size={12}/>
+                    </button>
+                  )}
                 </div>
               </div>
               <p className="text-muted text-sm" style={{ marginBottom: 16 }}>{s.description || 'No description'}</p>

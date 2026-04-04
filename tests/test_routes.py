@@ -104,6 +104,19 @@ class TestScenarios:
             resp = client.get("/api/scenario/9999", headers=auth_headers)
         assert resp.status_code == 404
 
+    def test_delete_sample_scenario_forbidden(self, client, auth_headers):
+        sample = {
+            "scenario_id": 1,
+            "name": "Section Convergence",
+            "is_sample": True,
+            "sample_key": "sample-section-convergence",
+        }
+
+        with patch("app.db.repository.fetch_scenario_by_id", return_value=sample):
+            resp = client.delete("/api/scenario/1", headers=auth_headers)
+
+        assert resp.status_code == 403
+
 
 class TestAnalysis:
 

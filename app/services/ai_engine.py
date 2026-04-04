@@ -250,37 +250,45 @@ class SolutionGenerator:
             victims = conflict_trains[1:]  # to be acted upon
 
             # ── Solution A: Reduce speed of lower-priority trains ──────────
-            sid += 1
-            speed_actions = []
-            total_delay = 0.0
-            for v in victims:
-                new_speed = max(20, int(v.current_speed * 0.5))
-                delay = ((v.distance_to_destination / (v.current_speed / 3.6)) -
-                         (v.distance_to_destination / (new_speed / 3.6))) if new_speed > 0 else 0
-                total_delay += delay
-                speed_actions.append({
-                    "train_id": v.train_id,
-                    "action": "reduce_speed",
-                    "new_speed": new_speed,
-                    "target_section": conflict.section,
-                })
+            speed_victims = [v for v in victims if v.current_speed > 0]
+            if speed_victims:
+                sid += 1
+                speed_actions = []
+                total_delay = 0.0
+                for v in speed_victims:
+                    current_speed = float(v.current_speed)
+                    new_speed = max(0, int(current_speed * 0.5))
+                    if current_speed > 0 and new_speed > 0:
+                        delay = (
+                            (v.distance_to_destination / (current_speed / 3.6))
+                            - (v.distance_to_destination / (new_speed / 3.6))
+                        )
+                    else:
+                        delay = 0.0
+                    total_delay += delay
+                    speed_actions.append({
+                        "train_id": v.train_id,
+                        "action": "reduce_speed",
+                        "new_speed": new_speed,
+                        "target_section": conflict.section,
+                    })
 
-            solutions.append(
-                Solution(
-                    solution_id=sid,
-                    solution_type="reduce_speed",
-                    description=(
-                        f"Reduce speed of {', '.join(v.train_id for v in victims)} "
-                        f"to clear {conflict.section} for {highest.train_id}."
-                    ),
-                    actions=speed_actions,
-                    impact=f"Adds ~{int(total_delay)}s delay to lower-priority trains.",
-                    delay_seconds=total_delay,
-                    confidence=0.85 if conflict.conflict_type == "same_section" else 0.75,
-                    priority="high",
-                    addresses_conflict=conflict.conflict_id,
+                solutions.append(
+                    Solution(
+                        solution_id=sid,
+                        solution_type="reduce_speed",
+                        description=(
+                            f"Reduce speed of {', '.join(v.train_id for v in speed_victims)} "
+                            f"to clear {conflict.section} for {highest.train_id}."
+                        ),
+                        actions=speed_actions,
+                        impact=f"Adds ~{int(total_delay)}s delay to lower-priority trains.",
+                        delay_seconds=total_delay,
+                        confidence=0.85 if conflict.conflict_type == "same_section" else 0.75,
+                        priority="high",
+                        addresses_conflict=conflict.conflict_id,
+                    )
                 )
-            )
 
             # ── Solution B: Reroute lowest-priority train ──────────────────
             if victims:

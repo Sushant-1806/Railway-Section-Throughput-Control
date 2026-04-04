@@ -15,9 +15,31 @@ const TYPE_STYLE = {
   none:         { bg: 'rgba(34,197,94,0.15)',  color: '#22c55e', label: 'No Action' },
 }
 
+function formatDelay(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0s'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const minutes = Math.floor(seconds / 60)
+  const remaining = Math.round(seconds % 60)
+  return remaining > 0 ? `${minutes}m ${remaining}s` : `${minutes}m`
+}
+
+function formatAction(action) {
+  if (action.action === 'reduce_speed') {
+    return `${action.train_id} → ${action.new_speed} km/h`
+  }
+  if (action.action === 'reroute') {
+    return `${action.train_id} → ${action.new_section || 'reroute'}`
+  }
+  if (action.action === 'stop') {
+    return `${action.train_id} → stop`
+  }
+  return `${action.train_id} → ${action.action}`
+}
+
 export default function SolutionPanel() {
   const {
     solutions, conflicts, selectedSolutionId, currentTrains,
+    currentScenarioId, simulationRunning,
     setSelectedSolution, setAnalysisResult, updateTrains,
   } = useRailwayStore()
 
@@ -31,7 +53,31 @@ export default function SolutionPanel() {
     if (!selectedSolutionId) return toast.error('Select a solution first')
     setApplying(true)
     try {
-      const r = await api.applySolution(selectedSolutionId, currentTrains)
+      const selectedSolution = useRailwayStore.getState().getSelectedSolution()
+      const r = await api.applySolution(selectedSolutionId, currentTrains, currentScenarioId)
+
+      if (simulationRunning && currentScenarioId && selectedSolution?.actions?.length) {
+        await Promise.all(
+          selectedSolution.actions.map((action) => {
+            const updates = {}
+
+            if (action.action === 'reduce_speed' && action.new_speed !== undefined) {
+              updates.current_speed = action.new_speed
+              updates.status = 'speed_reduced'
+            } else if (action.action === 'reroute' && action.new_section) {
+              updates.current_section = action.new_section
+              updates.status = 'rerouted'
+            } else if (action.action === 'stop') {
+              updates.current_speed = 0
+              updates.status = 'stopped'
+            }
+
+            if (Object.keys(updates).length === 0) return null
+            return api.overrideTrain(currentScenarioId, action.train_id, updates)
+          }).filter(Boolean)
+        )
+      }
+
       updateTrains(r.data.trains)
       setAnalysisResult([], [])
       setSelectedSolution(null)
@@ -97,67 +143,87 @@ export default function SolutionPanel() {
         </button>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {solutions.map((sol) => {
-          const style = TYPE_STYLE[sol.type] || TYPE_STYLE.none
-          const isSelected = selectedSolutionId === sol.solution_id
+      <div className="solution-table-wrap">
+        <table className="solution-table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Resolution</th>
+              <th>Metrics</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {solutions.map((sol) => {
+              const style = TYPE_STYLE[sol.type] || TYPE_STYLE.none
+              const isSelected = selectedSolutionId === sol.solution_id
 
-          return (
-            <div
-              key={sol.solution_id}
-              className={`solution-card ${isSelected ? 'selected' : ''}`}
-              onClick={() => handleSelect(sol)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => e.key === 'Enter' && handleSelect(sol)}
-            >
-              <span
-                className="solution-type-badge"
-                style={{ background: style.bg, color: style.color, border: `1px solid ${style.color}` }}
-              >
-                {style.label}
-              </span>
-
-              <div className="solution-desc">{sol.description}</div>
-              <div className="solution-impact" style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                {sol.impact}
-              </div>
-
-              <div className="solution-metrics">
-                <div className="metric">
-                  <Clock size={12}/>
-                  <span>Delay:</span>
-                  <strong>{sol.delay_seconds}s</strong>
-                </div>
-                <div className="metric" style={{ flex: 1 }}>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Confidence</span>
-                  <div className="confidence-bar" style={{ marginLeft: 6 }}>
-                    <div
-                      className="confidence-fill"
-                      style={{
-                        width: `${sol.confidence * 100}%`,
-                        background: sol.confidence > 0.8 ? 'var(--gradient-success)' : sol.confidence > 0.6 ? 'linear-gradient(90deg,#f59e0b,#ef4444)' : 'var(--gradient-danger)',
-                      }}
-                    />
-                  </div>
-                  <strong style={{ fontSize: '0.7rem', marginLeft: 4 }}>{Math.round(sol.confidence * 100)}%</strong>
-                </div>
-                {isSelected && <CheckCircle size={14} style={{ color: 'var(--primary)' }} />}
-              </div>
-
-              {sol.actions?.length > 0 && (
-                <div style={{
-                  marginTop: 8, fontSize: '0.75rem', color: 'var(--text-muted)',
-                  background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)', padding: '6px 10px',
-                }}>
-                  {sol.actions.map((a, i) => (
-                    <div key={i}>• <strong>{a.train_id}</strong>: {a.action}{a.new_speed !== undefined ? ` → ${a.new_speed} km/h` : ''}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )
-        })}
+              return (
+                <tr
+                  key={sol.solution_id}
+                  className={isSelected ? 'selected' : ''}
+                  onClick={() => handleSelect(sol)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSelect(sol)}
+                >
+                  <td>
+                    <div className="solution-type-wrap">
+                      <span
+                        className="solution-type-badge"
+                        style={{ background: style.bg, color: style.color, border: `1px solid ${style.color}` }}
+                      >
+                        {style.label}
+                      </span>
+                      {isSelected && <CheckCircle size={14} style={{ color: 'var(--primary)' }} />}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="solution-text-block">
+                      <div className="solution-desc">{sol.description}</div>
+                      <div className="solution-impact">{sol.impact}</div>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="solution-metrics-stack">
+                      <div className="metric">
+                        <Clock size={12}/>
+                        <span>Delay</span>
+                        <strong>{formatDelay(sol.delay_seconds)}</strong>
+                      </div>
+                      <div className="solution-confidence">
+                        <span>Confidence</span>
+                        <div className="confidence-bar">
+                          <div
+                            className="confidence-fill"
+                            style={{
+                              width: `${sol.confidence * 100}%`,
+                              background: sol.confidence > 0.8 ? 'var(--gradient-success)' : sol.confidence > 0.6 ? 'linear-gradient(90deg,#f59e0b,#ef4444)' : 'var(--gradient-danger)',
+                            }}
+                          />
+                        </div>
+                        <strong>{Math.round(sol.confidence * 100)}%</strong>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    {sol.actions?.length > 0 ? (
+                      <div className="solution-action-list">
+                        {sol.actions.map((action, index) => (
+                          <div key={`${action.train_id}-${index}`} className="solution-action-item">
+                            {formatAction(action)}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="solution-action-list muted">No actions required</div>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
 
       {selectedSolutionId && (

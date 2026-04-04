@@ -21,6 +21,7 @@ const useRailwayStore = create((set, get) => ({
   isAnalyzing: false,
 
   setAnalysisResult: (conflicts, solutions) => set({ conflicts, solutions }),
+  setConflicts: (conflicts) => set({ conflicts }),
   setSelectedSolution: (id) => set({ selectedSolutionId: id }),
   setAnalyzing: (val) => set({ isAnalyzing: val }),
 

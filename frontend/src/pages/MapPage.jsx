@@ -28,16 +28,26 @@ export default function MapPage() {
 
   const handleStartSim = async () => {
     if (!currentScenarioId) return toast.error('Load a scenario from the Dashboard first')
-    await api.startSimulation(currentScenarioId)
     setSimulationRunning(true)
-    toast.success('Simulation started')
+    try {
+      await api.startSimulation(currentScenarioId)
+      toast.success('Simulation started')
+    } catch {
+      setSimulationRunning(false)
+      toast.error('Failed to start simulation')
+    }
   }
 
   const handleStopSim = async () => {
     if (!currentScenarioId) return
-    await api.stopSimulation(currentScenarioId)
     setSimulationRunning(false)
-    toast.success('Simulation stopped')
+    try {
+      await api.stopSimulation(currentScenarioId)
+      toast.success('Simulation stopped')
+    } catch {
+      setSimulationRunning(true)
+      toast.error('Failed to stop simulation')
+    }
   }
 
   return (

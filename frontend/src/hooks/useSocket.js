@@ -21,7 +21,12 @@ export function getSocket() {
 
 export function useSocket(scenarioId) {
   const socketRef = useRef(null)
-  const { updateTrains, setAnalysisResult } = useRailwayStore()
+  const conflictToastRef = useRef('')
+  const { updateTrains, setConflicts, setAnalysisResult } = useRailwayStore()
+
+  const getConflictKey = (conflicts = []) => conflicts
+    .map((conflict) => `${conflict.conflict_id}:${conflict.section}:${(conflict.trains || []).join('|')}:${conflict.severity}`)
+    .join('||')
 
   useEffect(() => {
     const s = getSocket()
@@ -34,18 +39,27 @@ export function useSocket(scenarioId) {
     s.on('train_update', (data) => {
       if (data.scenario_id === scenarioId) {
         updateTrains(data.trains)
-        setAnalysisResult(data.conflicts || [], [])
+        const conflicts = data.conflicts || []
+        setConflicts(conflicts)
+        if (conflicts.length === 0) {
+          conflictToastRef.current = ''
+        }
       }
     })
 
     s.on('conflict_detected', (data) => {
       if (data.scenario_id === scenarioId) {
         setAnalysisResult(data.conflicts, data.solutions)
-        if (data.conflicts.length > 0) {
+        const conflictKey = getConflictKey(data.conflicts)
+        if (data.conflicts.length > 0 && conflictKey !== conflictToastRef.current) {
+          conflictToastRef.current = conflictKey
           toast.error(
             `⚠️ ${data.conflicts.length} conflict${data.conflicts.length > 1 ? 's' : ''} detected!`,
             { duration: 4000 }
           )
+        }
+        if (data.conflicts.length === 0) {
+          conflictToastRef.current = ''
         }
       }
     })
@@ -59,8 +73,9 @@ export function useSocket(scenarioId) {
       if (scenarioId) {
         s.emit('leave_scenario', { scenario_id: scenarioId })
       }
+      conflictToastRef.current = ''
     }
-  }, [scenarioId])
+  }, [scenarioId, setAnalysisResult, setConflicts, updateTrains])
 
   return socketRef.current
 }

@@ -78,19 +78,25 @@ export default function Dashboard() {
   const handleStartSim = async () => {
     if (!currentScenarioId) return toast.error('Load a scenario first')
     try {
-      await api.startSimulation(currentScenarioId)
       setSimulationRunning(true)
+      await api.startSimulation(currentScenarioId)
       toast.success('Simulation started')
-    } catch { toast.error('Failed to start simulation') }
+    } catch {
+      setSimulationRunning(false)
+      toast.error('Failed to start simulation')
+    }
   }
 
   const handleStopSim = async () => {
     if (!currentScenarioId) return
     try {
-      await api.stopSimulation(currentScenarioId)
       setSimulationRunning(false)
+      await api.stopSimulation(currentScenarioId)
       toast.success('Simulation stopped')
-    } catch { toast.error('Failed to stop simulation') }
+    } catch {
+      setSimulationRunning(true)
+      toast.error('Failed to stop simulation')
+    }
   }
 
   // Keyboard shortcuts
@@ -174,7 +180,9 @@ export default function Dashboard() {
           >
             <option value="">— Select a scenario —</option>
             {scenarios.map((s) => (
-              <option key={s.scenario_id} value={s.scenario_id}>{s.name}</option>
+              <option key={s.scenario_id} value={s.scenario_id}>
+                {s.name}{s.is_sample ? ' (Sample)' : ''}
+              </option>
             ))}
           </select>
           <button className="btn btn-primary" onClick={handleLoadScenario} disabled={loading || !selectedScenarioId}>
@@ -197,7 +205,7 @@ export default function Dashboard() {
       )}
 
       {/* ── Main Content Grid ────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(340px, 520px)', gap: 20, alignItems: 'start' }}>
 
         {/* Train Cards */}
         <div>

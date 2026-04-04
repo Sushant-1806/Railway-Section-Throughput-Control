@@ -1,15 +1,20 @@
 """
-setup_database.py — One-time database initializer.
+setup_database.py — Idempotent database bootstrapper.
 
 Run:  python setup_database.py
 
-Creates the railway_control database, all tables (with users + direction
-column), and inserts rich seed data including an admin user.
+Creates the railway_control database if needed, ensures the schema exists,
+and seeds the canonical demo users plus five sample scenarios.
 """
+
+import hashlib
+import os
+import secrets
 
 import psycopg
 from dotenv import load_dotenv
-import os
+
+from app.data.sample_scenarios import SAMPLE_SCENARIOS
 
 load_dotenv()
 
@@ -54,8 +59,8 @@ def create_database() -> None:
 
 def create_tables(conn) -> None:
     cur = conn.cursor()
-    cur.execute("DROP TABLE IF EXISTS trains, scenarios, users CASCADE")
-    cur.execute("""
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS users (
             user_id       SERIAL PRIMARY KEY,
             username      VARCHAR(50)  UNIQUE NOT NULL,
@@ -65,21 +70,28 @@ def create_tables(conn) -> None:
                               CHECK (role IN ('admin', 'operator')),
             created_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+        """
+    )
     print("✅ Table 'users' ready.")
 
-    cur.execute("""
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS scenarios (
-            scenario_id SERIAL PRIMARY KEY,
-            name        VARCHAR(255) NOT NULL,
-            description TEXT,
-            user_id     INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            scenario_id  SERIAL PRIMARY KEY,
+            name         VARCHAR(255) NOT NULL,
+            description  TEXT,
+            user_id      INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+            sample_key   TEXT,
+            is_sample    BOOLEAN NOT NULL DEFAULT FALSE,
+            sample_order INTEGER,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+        """
+    )
     print("✅ Table 'scenarios' ready.")
 
-    cur.execute("""
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS trains (
             id                      SERIAL PRIMARY KEY,
             scenario_id             INTEGER REFERENCES scenarios(scenario_id) ON DELETE CASCADE,
@@ -94,109 +106,133 @@ def create_tables(conn) -> None:
             status                  VARCHAR(50)  NOT NULL DEFAULT 'active',
             created_at              TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+        """
+    )
     print("✅ Table 'trains' ready.")
+
+    _ensure_schema_extensions(cur)
     conn.commit()
     cur.close()
+
+
+def _ensure_schema_extensions(cur) -> None:
+    cur.execute("ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS sample_key TEXT")
+    cur.execute("ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS is_sample BOOLEAN NOT NULL DEFAULT FALSE")
+    cur.execute("ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS sample_order INTEGER")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_scenarios_sample_key ON scenarios (sample_key)")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_trains_scenario_train_id ON trains (scenario_id, train_id)")
+
+
+def _password_hash(password: str) -> str:
+    salt = secrets.token_hex(16)
+    return f"{salt}:{hashlib.sha256(f'{salt}{password}'.encode()).hexdigest()}"
+
+
+def _upsert_user(cur, username: str, email: str, password: str, role: str) -> None:
+    cur.execute(
+        """
+        INSERT INTO users (username, email, password_hash, role)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (username) DO UPDATE SET
+            email = EXCLUDED.email,
+            password_hash = EXCLUDED.password_hash,
+            role = EXCLUDED.role
+        """,
+        (username, email, _password_hash(password), role),
+    )
+
+
+def _find_sample_row(cur, sample: dict) -> int | None:
+    cur.execute("SELECT scenario_id FROM scenarios WHERE sample_key = %s", (sample["sample_key"],))
+    row = cur.fetchone()
+    if row:
+        return row[0]
+
+    for legacy_name in sample.get("legacy_names", []):
+        cur.execute(
+            "SELECT scenario_id FROM scenarios WHERE name = %s ORDER BY created_at ASC LIMIT 1",
+            (legacy_name,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+    return None
+
+
+def _insert_train(cur, scenario_id: int, train: dict) -> None:
+    cur.execute(
+        """
+        INSERT INTO trains
+            (scenario_id, train_id, train_type, priority, current_speed,
+             current_section, destination, distance_to_destination, direction)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (scenario_id, train_id) DO NOTHING
+        """,
+        (
+            scenario_id,
+            train["train_id"],
+            train["train_type"],
+            train["priority"],
+            train["current_speed"],
+            train["current_section"],
+            train["destination"],
+            train["distance_to_destination"],
+            train.get("direction", "forward"),
+        ),
+    )
 
 
 def seed_data(conn) -> None:
     cur = conn.cursor()
 
-    # Admin user (password: admin123)
-    import hashlib, secrets
-    salt = secrets.token_hex(16)
-    pw_hash = f"{salt}:{hashlib.sha256(f'{salt}admin123'.encode()).hexdigest()}"
-    try:
-        cur.execute(
-            "INSERT INTO users (username, email, password_hash, role) VALUES (%s, %s, %s, 'admin') ON CONFLICT DO NOTHING",
-            ("admin", "admin@railway.local", pw_hash),
-        )
-    except Exception:
-        pass
-
-    # Seed operator user (password: operator123)
-    salt2 = secrets.token_hex(16)
-    pw_hash2 = f"{salt2}:{hashlib.sha256(f'{salt2}operator123'.encode()).hexdigest()}"
-    try:
-        cur.execute(
-            "INSERT INTO users (username, email, password_hash, role) VALUES (%s, %s, %s, 'operator') ON CONFLICT DO NOTHING",
-            ("operator", "operator@railway.local", pw_hash2),
-        )
-    except Exception:
-        pass
-
+    _upsert_user(cur, "admin", "admin@railway.local", "admin123", "admin")
+    _upsert_user(cur, "operator", "operator@railway.local", "operator123", "operator")
     conn.commit()
 
-    cur.execute("SELECT user_id FROM users WHERE username = 'admin'")
-    admin_id = cur.fetchone()[0]
+    for sample in SAMPLE_SCENARIOS:
+        scenario_id = _find_sample_row(cur, sample)
+        if scenario_id is None:
+            cur.execute(
+                """
+                INSERT INTO scenarios (name, description, user_id, sample_key, is_sample, sample_order)
+                VALUES (%s, %s, NULL, %s, TRUE, %s)
+                RETURNING scenario_id
+                """,
+                (
+                    sample["name"],
+                    sample["description"],
+                    sample["sample_key"],
+                    sample["sample_order"],
+                ),
+            )
+            scenario_id = cur.fetchone()[0]
+        else:
+            cur.execute(
+                """
+                UPDATE scenarios
+                SET name = %s,
+                    description = %s,
+                    user_id = NULL,
+                    sample_key = %s,
+                    is_sample = TRUE,
+                    sample_order = %s
+                WHERE scenario_id = %s
+                """,
+                (
+                    sample["name"],
+                    sample["description"],
+                    sample["sample_key"],
+                    sample["sample_order"],
+                    scenario_id,
+                ),
+            )
+            cur.execute("DELETE FROM trains WHERE scenario_id = %s", (scenario_id,))
 
-    # ── Scenario 1: Simple Conflict ──────────────────────────────────────────
-    cur.execute(
-        "INSERT INTO scenarios (name, description, user_id) VALUES (%s, %s, %s) RETURNING scenario_id",
-        ("Simple Section Conflict", "Two trains converging on Section C", admin_id),
-    )
-    s1 = cur.fetchone()[0]
+        for train in sample["trains"]:
+            _insert_train(cur, scenario_id, train)
 
-    trains_s1 = [
-        ("T101", "Express",   1, 85, "B", "E", 340, "forward"),
-        ("T202", "Freight",   3, 55, "B", "L", 420, "forward"),
-    ]
-    for t in trains_s1:
-        cur.execute(
-            """INSERT INTO trains
-               (scenario_id, train_id, train_type, priority, current_speed,
-                current_section, destination, distance_to_destination, direction)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (s1,) + t,
-        )
-    print("✅ Scenario 1: Simple Section Conflict")
-
-    # ── Scenario 2: Multi-Train ──────────────────────────────────────────────
-    cur.execute(
-        "INSERT INTO scenarios (name, description, user_id) VALUES (%s, %s, %s) RETURNING scenario_id",
-        ("Multi-Train Rush", "Multiple trains across the network at peak hour", admin_id),
-    )
-    s2 = cur.fetchone()[0]
-
-    trains_s2 = [
-        ("T301", "Passenger", 1, 90,  "A", "E", 490, "forward"),
-        ("T302", "Express",   2, 110, "C", "L", 410, "forward"),
-        ("T303", "Freight",   4, 50,  "F", "H", 150, "forward"),
-        ("T304", "Local",     3, 70,  "I", "L", 210, "forward"),
-        ("T305", "Passenger", 2, 80,  "D", "A", 330, "backward"),
-    ]
-    for t in trains_s2:
-        cur.execute(
-            """INSERT INTO trains
-               (scenario_id, train_id, train_type, priority, current_speed,
-                current_section, destination, distance_to_destination, direction)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (s2,) + t,
-        )
-    print("✅ Scenario 2: Multi-Train Rush")
-
-    # ── Scenario 3: Normal Operations ────────────────────────────────────────
-    cur.execute(
-        "INSERT INTO scenarios (name, description, user_id) VALUES (%s, %s, %s) RETURNING scenario_id",
-        ("Normal Operations", "Trains on separate tracks with no conflicts", admin_id),
-    )
-    s3 = cur.fetchone()[0]
-
-    trains_s3 = [
-        ("T401", "Express",   1, 120, "A", "E", 490, "forward"),
-        ("T402", "Passenger", 2, 80,  "H", "A", 500, "backward"),
-        ("T403", "Freight",   3, 55,  "I", "L", 210, "forward"),
-    ]
-    for t in trains_s3:
-        cur.execute(
-            """INSERT INTO trains
-               (scenario_id, train_id, train_type, priority, current_speed,
-                current_section, destination, distance_to_destination, direction)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (s3,) + t,
-        )
-    print("✅ Scenario 3: Normal Operations")
+        print(f"✅ Sample scenario ready: {sample['name']} ({len(sample['trains'])} trains)")
 
     conn.commit()
     cur.close()

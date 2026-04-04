@@ -114,7 +114,7 @@ export default function AnalysisPage() {
         )}
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 380px', gap:20 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(340px, 520px)', gap:20, alignItems:'start' }}>
         {/* Conflict detail */}
         <div>
           <h2 style={{ fontSize:'1rem', fontWeight:600, marginBottom:12 }}>
