@@ -59,7 +59,7 @@ export default function TrackMap() {
       .attr('orient', 'auto')
       .append('path')
         .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', '#1e2d4d')
+        .attr('fill', 'var(--map-arrow)')
 
     // Glow filter
     const glowFilter = defs.append('filter').attr('id', 'glow')
@@ -81,13 +81,13 @@ export default function TrackMap() {
       grid.append('line')
         .attr('x1', x).attr('y1', 0)
         .attr('x2', x).attr('y2', MAP_H)
-        .attr('stroke', '#1a2440').attr('stroke-width', 0.5)
+        .attr('stroke', 'var(--map-grid)').attr('stroke-width', 0.5)
     }
     for (let y = 0; y <= MAP_H; y += 80) {
       grid.append('line')
         .attr('x1', 0).attr('y1', y)
         .attr('x2', MAP_W).attr('y2', y)
-        .attr('stroke', '#1a2440').attr('stroke-width', 0.5)
+        .attr('stroke', 'var(--map-grid)').attr('stroke-width', 0.5)
     }
 
     // ── Tracks (edges) ────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export default function TrackMap() {
       edgeGroup.append('line')
         .attr('x1', src.x).attr('y1', src.y)
         .attr('x2', dst.x).attr('y2', dst.y)
-        .attr('stroke', '#0a1428')
+        .attr('stroke', 'var(--map-track-shadow)')
         .attr('stroke-width', 8)
         .attr('stroke-linecap', 'round')
 
@@ -116,7 +116,7 @@ export default function TrackMap() {
       edgeGroup.append('line')
         .attr('x1', src.x).attr('y1', src.y)
         .attr('x2', dst.x).attr('y2', dst.y)
-        .attr('stroke', '#243356')
+        .attr('stroke', 'var(--map-track)')
         .attr('stroke-width', 4)
         .attr('stroke-linecap', 'round')
         .attr('marker-end', 'url(#arrow)')
@@ -127,7 +127,7 @@ export default function TrackMap() {
       edgeGroup.append('text')
         .attr('x', mx).attr('y', my - 6)
         .attr('text-anchor', 'middle')
-        .attr('fill', '#2d4070')
+        .attr('fill', 'var(--map-track-label)')
         .attr('font-size', '10px')
         .attr('font-family', 'JetBrains Mono, monospace')
         .text(`${edge.distance}km`)
@@ -143,18 +143,18 @@ export default function TrackMap() {
 
       // Outer ring
       g.append('circle').attr('r', 18).attr('fill', 'none')
-        .attr('stroke', '#1e2d4d').attr('stroke-width', 2)
+        .attr('stroke', 'var(--map-station-ring)').attr('stroke-width', 2)
 
       // Station dot
       g.append('circle').attr('r', 12)
-        .attr('fill', '#0f1e38')
-        .attr('stroke', '#3b82f6')
+        .attr('fill', 'var(--map-station-fill)')
+        .attr('stroke', 'var(--map-station-stroke)')
         .attr('stroke-width', 2)
 
       // Station label (inner)
       g.append('text')
         .attr('text-anchor', 'middle').attr('dy', '0.35em')
-        .attr('fill', '#94a3b8').attr('font-size', '10px')
+        .attr('fill', 'var(--map-station-label)').attr('font-size', '10px')
         .attr('font-family', 'JetBrains Mono, monospace')
         .attr('font-weight', '600')
         .text(node.id)
@@ -164,8 +164,8 @@ export default function TrackMap() {
       g.append('text')
         .attr('text-anchor', 'middle')
         .attr('dy', isBottom ? '32px' : '-22px')
-        .attr('fill', '#64748b').attr('font-size', '9px')
-        .attr('font-family', 'Inter, sans-serif')
+        .attr('fill', 'var(--map-station-name)').attr('font-size', '9px')
+        .attr('font-family', 'Manrope, sans-serif')
         .text(node.label)
     })
 
@@ -234,7 +234,7 @@ export default function TrackMap() {
       legendGroup.append('circle').attr('cx', 8).attr('cy', i * 18).attr('r', 5).attr('fill', color)
       legendGroup.append('text')
         .attr('x', 18).attr('y', i * 18 + 4)
-        .attr('fill', '#64748b').attr('font-size', '10px').attr('font-family', 'Inter, sans-serif')
+        .attr('fill', 'var(--map-legend-text)').attr('font-size', '10px').attr('font-family', 'Manrope, sans-serif')
         .text(type)
     })
 

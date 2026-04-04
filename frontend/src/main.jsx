@@ -4,10 +4,24 @@ import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import App from './App'
 import './index.css'
+import useThemeStore from './store/themeStore'
+
+function ThemeSync() {
+  const theme = useThemeStore((s) => s.theme)
+
+  React.useEffect(() => {
+    const root = document.documentElement
+    root.dataset.theme = theme
+    root.style.colorScheme = theme
+  }, [theme])
+
+  return null
+}
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
+      <ThemeSync />
       <App />
       <Toaster
         position="top-right"
@@ -16,7 +30,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             background: 'var(--surface-elevated)',
             color: 'var(--text-primary)',
             border: '1px solid var(--border)',
-            fontFamily: 'Inter, sans-serif',
+            borderRadius: '14px',
+            boxShadow: 'var(--shadow-md)',
+            fontFamily: 'var(--font-body)',
           },
           success: { iconTheme: { primary: '#22c55e', secondary: '#fff' } },
           error:   { iconTheme: { primary: '#ef4444', secondary: '#fff' } },

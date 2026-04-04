@@ -9,6 +9,7 @@ import {
 import useAuthStore from '../../store/authStore'
 import useRailwayStore from '../../store/railwayStore'
 import toast from 'react-hot-toast'
+import ThemeToggle from '../common/ThemeToggle'
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -50,6 +51,7 @@ export default function Layout({ children }) {
           )}
         </div>
         <div className="topbar-right">
+          <ThemeToggle />
           {conflicts.length > 0 && (
             <span style={{
               display:'inline-flex', alignItems:'center', gap:6,
