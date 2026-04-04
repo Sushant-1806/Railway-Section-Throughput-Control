@@ -45,4 +45,4 @@ class Config:
     ).split(",")
 
     # ── SocketIO ──────────────────────────────────────────────────────────────
-    SOCKETIO_ASYNC_MODE: str = os.getenv("SOCKETIO_ASYNC_MODE", "eventlet")
+    SOCKETIO_ASYNC_MODE: str = os.getenv("SOCKETIO_ASYNC_MODE", "threading")

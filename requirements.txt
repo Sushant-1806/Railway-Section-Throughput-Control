@@ -16,8 +16,8 @@ pydantic>=2.9.0
 # Graph algorithms
 networkx==3.3
 
-# Async support
-eventlet==0.35.2
+# Socket.IO transport support
+simple-websocket==1.1.0
 
 # Production server
 gunicorn==21.2.0
