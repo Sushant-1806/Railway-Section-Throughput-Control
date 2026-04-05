@@ -345,12 +345,13 @@ class SolutionGenerator:
                         solution_type="hold",
                         description=(
                             f"Hold {lowest.train_id} at {lowest.current_section} "
-                            f"for 5 minutes until {conflict.section} clears."
+                            f"until {conflict.section} clears."
                         ),
                         actions=[{
                             "train_id": lowest.train_id,
                             "action": "stop",
                             "new_speed": 0,
+                            "original_speed": int(lowest.current_speed),
                             "hold_seconds": hold_time,
                         }],
                         impact=f"Delays {lowest.train_id} by {hold_time}s, zero impact on other trains.",

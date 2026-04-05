@@ -3,6 +3,12 @@ app/services/simulator.py — Real-time train movement simulation.
 
 Runs as a background thread via Flask-SocketIO, updating train positions
 every TICK_SECONDS and broadcasting via WebSocket events.
+
+Uses SIM_TIME_MULTIPLIER to accelerate simulation time so that demo
+scenarios play out in seconds rather than hours.
+
+Stopped trains auto-restart once the conflict that caused them to stop
+has been resolved (no active conflict involving them).
 """
 
 from __future__ import annotations
@@ -16,7 +22,9 @@ from app.services import ai_engine
 
 logger = logging.getLogger(__name__)
 
-TICK_SECONDS = 2.0  # simulation tick rate
+TICK_SECONDS = 1.0           # real-world seconds between ticks
+SIM_TIME_MULTIPLIER = 1000   # each tick simulates 1000x real seconds (demo speed)
+RESTART_DELAY_TICKS = 1      # ticks to wait after conflict clears before restarting
 
 # ── In-memory state (keyed by scenario_id) ────────────────────────────────────
 _scenarios: dict[int, list[dict]] = {}
@@ -67,6 +75,9 @@ def update_train_override(scenario_id: int, train_id: str, updates: dict) -> Non
     trains = _scenarios.get(scenario_id, [])
     for t in trains:
         if t["train_id"] == train_id:
+            # If stopping, save original speed for later restart
+            if updates.get("status") == "stopped" and t.get("current_speed", 0) > 0:
+                t["_original_speed"] = t["current_speed"]
             t.update(updates)
             break
 
@@ -74,7 +85,7 @@ def update_train_override(scenario_id: int, train_id: str, updates: dict) -> Non
 # ── Simulation loop ───────────────────────────────────────────────────────────
 
 def _simulation_loop(scenario_id: int) -> None:
-    """Main tick loop: advance trains, detect conflicts, broadcast updates."""
+    """Main tick loop: advance trains, detect conflicts, auto-restart, broadcast."""
     while _running.get(scenario_id, False):
         try:
             trains = _scenarios.get(scenario_id, [])
@@ -82,11 +93,16 @@ def _simulation_loop(scenario_id: int) -> None:
                 time.sleep(TICK_SECONDS)
                 continue
 
+            # Advance all active trains
             for train in trains:
                 _advance_train(train)
 
-            # Run AI analysis
+            # Run AI analysis for conflict detection
             result = ai_engine.analyze(trains, lookahead_seconds=60)
+            active_conflicts = result["conflicts"]
+
+            # Auto-restart stopped trains whose conflicts have cleared
+            _auto_restart_trains(trains, active_conflicts)
 
             # Emit updates to all clients in the scenario's SocketIO room
             if _socketio:
@@ -95,17 +111,17 @@ def _simulation_loop(scenario_id: int) -> None:
                     {
                         "scenario_id": scenario_id,
                         "trains": trains,
-                        "conflicts": result["conflicts"],
+                        "conflicts": active_conflicts,
                     },
                     room=f"scenario_{scenario_id}",
                 )
 
-                if result["conflicts"]:
+                if active_conflicts:
                     _socketio.emit(
                         "conflict_detected",
                         {
                             "scenario_id": scenario_id,
-                            "conflicts": result["conflicts"],
+                            "conflicts": active_conflicts,
                             "solutions": result["solutions"],
                         },
                         room=f"scenario_{scenario_id}",
@@ -120,16 +136,20 @@ def _simulation_loop(scenario_id: int) -> None:
 def _advance_train(train: dict) -> None:
     """
     Move a train one tick forward along its graph path.
-    Updates current_section, distance_to_destination, and status.
+    Uses SIM_TIME_MULTIPLIER to accelerate movement for demo purposes.
     """
-    if train.get("status") in ("stopped", "arrived"):
+    if train.get("status") == "arrived":
+        return
+    if train.get("status") == "stopped":
+        train["_stopped_ticks"] = train.get("_stopped_ticks", 0) + 1
         return
     if train.get("current_speed", 0) <= 0:
         return
 
     speed_kmh = float(train["current_speed"])
     speed_ms = speed_kmh / 3.6
-    distance_covered_km = (speed_ms * TICK_SECONDS) / 1000
+    # Accelerated distance: multiply by SIM_TIME_MULTIPLIER for demo speed
+    distance_covered_km = (speed_ms * TICK_SECONDS * SIM_TIME_MULTIPLIER) / 1000
 
     current = train.get("current_section", "A")
     destination = train.get("destination", "L")
@@ -145,27 +165,90 @@ def _advance_train(train: dict) -> None:
         train["status"] = "arrived"
         return
 
-    # Move to next node if we've covered the edge distance
-    next_node = path[1]
-    edge_data = NETWORK.edges.get((current, next_node))
-    if not edge_data:
+    # Walk along the path, potentially crossing multiple edges in one tick
+    remaining_distance = distance_covered_km
+    current_node = current
+
+    for i in range(len(path) - 1):
+        if path[i] != current_node:
+            continue
+
+        next_node = path[i + 1]
+        edge_data = NETWORK.edges.get((current_node, next_node))
+        if not edge_data:
+            break
+
+        edge_distance_km = edge_data["distance"]
+
+        if remaining_distance >= edge_distance_km:
+            # Cross this edge entirely
+            clear_edge_occupation(current_node, next_node, train["train_id"])
+            remaining_distance -= edge_distance_km
+            current_node = next_node
+        else:
+            # Partially along this edge
+            mark_edge_occupied(current_node, next_node, train["train_id"])
+            break
+
+    train["current_section"] = current_node
+
+    # Check if arrived
+    if current_node == destination:
+        train["status"] = "arrived"
+        train["current_speed"] = 0
         return
-
-    edge_distance_km = edge_data["distance"]
-
-    # Simple: if covered distance >= edge distance, advance to next node
-    if distance_covered_km >= edge_distance_km:
-        clear_edge_occupation(current, next_node, train["train_id"])
-        train["current_section"] = next_node
-        mark_edge_occupied(next_node, destination, train["train_id"])
-    else:
-        mark_edge_occupied(current, next_node, train["train_id"])
 
     # Update distance
     remaining = float(train.get("distance_to_destination", 0))
     train["distance_to_destination"] = max(0, remaining - distance_covered_km)
 
-    # Respect speed limit
-    speed_limit = edge_data.get("speed_limit", 130)
-    if speed_kmh > speed_limit:
-        train["current_speed"] = speed_limit
+    # Respect speed limit on current edge
+    next_path = shortest_path(current_node, destination)
+    if next_path and len(next_path) > 1:
+        edge_data = NETWORK.edges.get((current_node, next_path[1]))
+        if edge_data:
+            speed_limit = edge_data.get("speed_limit", 130)
+            if speed_kmh > speed_limit:
+                train["current_speed"] = speed_limit
+
+
+def _auto_restart_trains(trains: list[dict], active_conflicts: list[dict]) -> None:
+    """
+    Check stopped trains and restart them if their conflict has cleared.
+    A train restarts when:
+      1. It's been stopped for at least RESTART_DELAY_TICKS
+      2. It's not involved in any active conflict
+    """
+    conflicting_train_ids = set()
+    for conflict in active_conflicts:
+        for tid in conflict.get("trains", []):
+            conflicting_train_ids.add(tid)
+
+    for train in trains:
+        if train.get("status") != "stopped":
+            continue
+
+        train_id = train["train_id"]
+        stopped_ticks = train.get("_stopped_ticks", 0)
+
+        # Don't restart if still in an active conflict
+        if train_id in conflicting_train_ids:
+            continue
+
+        # Wait a realistic delay before restarting
+        if stopped_ticks < RESTART_DELAY_TICKS:
+            continue
+
+        # Restart the train
+        original_speed = train.get("_original_speed", 60)
+        train["current_speed"] = original_speed
+        train["status"] = "active"
+
+        # Clean up internal state
+        train.pop("_stopped_ticks", None)
+        train.pop("_original_speed", None)
+
+        logger.info(
+            "Auto-restarted train %s at %d km/h (conflict cleared after %d ticks)",
+            train_id, original_speed, stopped_ticks,
+        )

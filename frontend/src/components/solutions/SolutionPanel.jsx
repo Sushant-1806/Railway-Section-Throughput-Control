@@ -70,6 +70,9 @@ export default function SolutionPanel() {
             } else if (action.action === 'stop') {
               updates.current_speed = 0
               updates.status = 'stopped'
+              if (action.original_speed) {
+                updates._original_speed = action.original_speed
+              }
             }
 
             if (Object.keys(updates).length === 0) return null

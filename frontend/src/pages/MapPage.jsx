@@ -1,9 +1,9 @@
 /**
- * pages/MapPage.jsx — Full-screen track map with live controls.
+ * pages/MapPage.jsx — Full-screen tactical track map with live controls and status HUD.
  */
 
 import { useEffect } from 'react'
-import { Map, Play, Square } from 'lucide-react'
+import { Map, Play, Square, Activity, AlertTriangle, Pause } from 'lucide-react'
 import toast from 'react-hot-toast'
 import useRailwayStore from '../store/railwayStore'
 import { useSocket } from '../hooks/useSocket'
@@ -50,14 +50,21 @@ export default function MapPage() {
     }
   }
 
+  const activeTrains = currentTrains.filter((t) => t.status === 'active' || t.status === 'speed_reduced' || t.status === 'rerouted').length
+  const stoppedTrains = currentTrains.filter((t) => t.status === 'stopped').length
+  const arrivedTrains = currentTrains.filter((t) => t.status === 'arrived').length
+  const criticalConflicts = conflicts.filter((c) => c.severity === 'critical').length
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4" style={{ marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em' }}>Track Map</h1>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
+            Track Map
+          </h1>
           <p className="text-muted text-sm" style={{ marginTop: 4 }}>
-            Live railway network visualization · {currentTrains.length} trains
-            {conflicts.length > 0 && <span className="text-danger"> · {conflicts.length} conflicts</span>}
+            Tactical railway network visualization
+            {simulationRunning && <span style={{ color: 'var(--success)', fontWeight: 600 }}> · LIVE</span>}
           </p>
         </div>
         <div className="flex gap-2">
@@ -73,21 +80,64 @@ export default function MapPage() {
         </div>
       </div>
 
-      {/* Legend */}
-      <div className="card" style={{ marginBottom: 16, padding: '12px 20px' }}>
-        <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
-          {[
-            { color: '#3b82f6', label: 'Express' },
-            { color: '#22c55e', label: 'Passenger' },
-            { color: '#f59e0b', label: 'Freight' },
-            { color: '#a78bfa', label: 'Local' },
-            { color: '#ef4444', label: 'Conflict' },
-          ].map(({ color, label }) => (
-            <div key={label} style={{ display:'flex', alignItems:'center', gap:6 }}>
-              <div style={{ width:10, height:10, borderRadius:'50%', background:color }} />
-              <span className="text-sm text-muted">{label}</span>
+      {/* Status HUD Bar */}
+      <div className="card" style={{ marginBottom: 16, padding: '10px 20px' }}>
+        <div className="flex gap-4" style={{ flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+
+          {/* Left: train type legend */}
+          <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
+            {[
+              { color: '#3b82f6', label: 'Express' },
+              { color: '#22c55e', label: 'Passenger' },
+              { color: '#f59e0b', label: 'Freight' },
+              { color: '#a78bfa', label: 'Local' },
+            ].map(({ color, label }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
+                <span className="text-sm text-muted">{label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Right: live counters */}
+          <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
+            <div className="hud-stat">
+              <Activity size={13} style={{ color: 'var(--success)' }} />
+              <span className="text-sm">
+                <strong>{activeTrains}</strong> Moving
+              </span>
             </div>
-          ))}
+            <div className="hud-stat">
+              <Pause size={13} style={{ color: 'var(--text-muted)' }} />
+              <span className="text-sm">
+                <strong>{stoppedTrains}</strong> Held
+              </span>
+            </div>
+            {arrivedTrains > 0 && (
+              <div className="hud-stat">
+                <span className="text-sm" style={{ color: 'var(--success)' }}>
+                  <strong>{arrivedTrains}</strong> Arrived
+                </span>
+              </div>
+            )}
+            {conflicts.length > 0 && (
+              <div className="hud-stat" style={{ color: 'var(--danger)' }}>
+                <AlertTriangle size={13} />
+                <span className="text-sm">
+                  <strong>{conflicts.length}</strong> Conflict{conflicts.length > 1 ? 's' : ''}
+                  {criticalConflicts > 0 && <span> ({criticalConflicts} critical)</span>}
+                </span>
+              </div>
+            )}
+            <div className="hud-stat">
+              <div style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: simulationRunning ? '#22c55e' : '#6b7280',
+                boxShadow: simulationRunning ? '0 0 6px #22c55e' : 'none',
+              }} />
+              <span className="text-sm text-muted">{simulationRunning ? 'LIVE' : 'PAUSED'}</span>
+            </div>
+          </div>
         </div>
       </div>
 
