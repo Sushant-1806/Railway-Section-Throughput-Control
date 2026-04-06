@@ -22,9 +22,9 @@ from app.services import ai_engine
 
 logger = logging.getLogger(__name__)
 
-TICK_SECONDS = 1.0           # real-world seconds between ticks
-SIM_TIME_MULTIPLIER = 1000   # each tick simulates 1000x real seconds (demo speed)
-RESTART_DELAY_TICKS = 1      # ticks to wait after conflict clears before restarting
+TICK_SECONDS = 0.5           # real-world seconds between ticks (2 ticks/sec for smoother updates)
+SIM_TIME_MULTIPLIER = 600    # each tick simulates 600x real seconds (demo speed)
+RESTART_DELAY_TICKS = 2      # ticks to wait after conflict clears before restarting
 
 # ── In-memory state (keyed by scenario_id) ────────────────────────────────────
 _scenarios: dict[int, list[dict]] = {}
@@ -45,7 +45,10 @@ def start_simulation(scenario_id: int, trains: list[dict]) -> None:
         logger.warning("Simulation already running for scenario %d", scenario_id)
         return
 
-    _scenarios[scenario_id] = [dict(t) for t in trains]
+    _scenarios[scenario_id] = [
+        {**t, "origin": t.get("current_section", "A"), "edge_progress": 0.0, "next_section": None, "path_progress": 0.0}
+        for t in trains
+    ]
     _running[scenario_id] = True
 
     thread = threading.Thread(
@@ -106,11 +109,16 @@ def _simulation_loop(scenario_id: int) -> None:
 
             # Emit updates to all clients in the scenario's SocketIO room
             if _socketio:
+                # Strip internal fields (prefixed with _) before sending
+                clean_trains = [
+                    {k: v for k, v in t.items() if not k.startswith("_")}
+                    for t in trains
+                ]
                 _socketio.emit(
                     "train_update",
                     {
                         "scenario_id": scenario_id,
-                        "trains": trains,
+                        "trains": clean_trains,
                         "conflicts": active_conflicts,
                     },
                     room=f"scenario_{scenario_id}",
@@ -137,6 +145,9 @@ def _advance_train(train: dict) -> None:
     """
     Move a train one tick forward along its graph path.
     Uses SIM_TIME_MULTIPLIER to accelerate movement for demo purposes.
+
+    Tracks fractional edge progress so the frontend can interpolate
+    smooth positions between nodes.
     """
     if train.get("status") == "arrived":
         return
@@ -157,17 +168,38 @@ def _advance_train(train: dict) -> None:
     if current == destination:
         train["status"] = "arrived"
         train["current_speed"] = 0
+        train["edge_progress"] = 0.0
+        train["next_section"] = None
         return
 
-    # Get path
+    # Get the full path from the train's origin to destination for progress tracking
+    origin = train.get("origin", current)
+    full_path = shortest_path(origin, destination)
+    full_total = _path_total_distance(full_path) if full_path else 0
+
+    # Get path from current position
     path = shortest_path(current, destination)
     if not path or len(path) < 2:
         train["status"] = "arrived"
+        train["edge_progress"] = 0.0
+        train["next_section"] = None
         return
+
+    # Start with any leftover edge progress from previous tick
+    edge_progress = float(train.get("edge_progress", 0.0))
+    first_edge_data = NETWORK.edges.get((path[0], path[1]))
+    if first_edge_data and edge_progress > 0:
+        # Convert fractional progress back to km remaining on current edge
+        edge_km = first_edge_data["distance"]
+        remaining_on_edge = edge_km * (1.0 - edge_progress)
+    else:
+        remaining_on_edge = None
 
     # Walk along the path, potentially crossing multiple edges in one tick
     remaining_distance = distance_covered_km
     current_node = current
+    frac_progress = 0.0
+    next_section = None
 
     for i in range(len(path) - 1):
         if path[i] != current_node:
@@ -180,22 +212,59 @@ def _advance_train(train: dict) -> None:
 
         edge_distance_km = edge_data["distance"]
 
-        if remaining_distance >= edge_distance_km:
+        # On the first edge, account for already-traversed fraction
+        if remaining_on_edge is not None:
+            effective_edge_distance = remaining_on_edge
+            remaining_on_edge = None  # Only applies to the first edge
+        else:
+            effective_edge_distance = edge_distance_km
+
+        if remaining_distance >= effective_edge_distance:
             # Cross this edge entirely
             clear_edge_occupation(current_node, next_node, train["train_id"])
-            remaining_distance -= edge_distance_km
+            remaining_distance -= effective_edge_distance
             current_node = next_node
+            frac_progress = 0.0
+            next_section = None
         else:
             # Partially along this edge
             mark_edge_occupied(current_node, next_node, train["train_id"])
+            # Calculate fractional position along this edge
+            already_covered = edge_distance_km - effective_edge_distance
+            frac_progress = (already_covered + remaining_distance) / edge_distance_km
+            frac_progress = max(0.0, min(1.0, frac_progress))
+            next_section = next_node
+            remaining_distance = 0
             break
 
     train["current_section"] = current_node
+    train["edge_progress"] = frac_progress
+    train["next_section"] = next_section
+
+    # Compute overall path progress (0.0 to 1.0) from origin to destination
+    if full_path and full_total > 0:
+        # Distance from origin to current_node
+        dist_to_current = 0
+        for i in range(len(full_path) - 1):
+            if full_path[i] == current_node:
+                break
+            edge = NETWORK.edges.get((full_path[i], full_path[i + 1]))
+            if edge:
+                dist_to_current += edge["distance"]
+        # Add fractional edge progress
+        if next_section and NETWORK.has_edge(current_node, next_section):
+            dist_to_current += NETWORK.edges[current_node, next_section]["distance"] * frac_progress
+        train["path_progress"] = max(0.0, min(1.0, dist_to_current / full_total))
+    else:
+        train["path_progress"] = 0.0
 
     # Check if arrived
     if current_node == destination:
         train["status"] = "arrived"
         train["current_speed"] = 0
+        train["edge_progress"] = 0.0
+        train["next_section"] = None
+        train["path_progress"] = 1.0
         return
 
     # Update distance
@@ -210,6 +279,18 @@ def _advance_train(train: dict) -> None:
             speed_limit = edge_data.get("speed_limit", 130)
             if speed_kmh > speed_limit:
                 train["current_speed"] = speed_limit
+
+
+def _path_total_distance(path: list[str] | None) -> float:
+    """Sum edge distances along a path."""
+    if not path:
+        return 0
+    total = 0
+    for i in range(len(path) - 1):
+        edge = NETWORK.edges.get((path[i], path[i + 1]))
+        if edge:
+            total += edge["distance"]
+    return total
 
 
 def _auto_restart_trains(trains: list[dict], active_conflicts: list[dict]) -> None:

@@ -70,9 +70,9 @@ export default function SolutionPanel() {
             } else if (action.action === 'stop') {
               updates.current_speed = 0
               updates.status = 'stopped'
-              if (action.original_speed) {
-                updates._original_speed = action.original_speed
-              }
+              // Always save original speed for auto-restart
+              const trainData = currentTrains.find((t) => t.train_id === action.train_id)
+              updates._original_speed = action.original_speed || trainData?.current_speed || 60
             }
 
             if (Object.keys(updates).length === 0) return null
