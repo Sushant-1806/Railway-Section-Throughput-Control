@@ -114,51 +114,50 @@ export default function AnalysisPage() {
         )}
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(340px, 520px)', gap:20, alignItems:'start' }}>
-        {/* Conflict detail */}
-        <div>
-          <h2 style={{ fontSize:'1rem', fontWeight:600, marginBottom:12 }}>
-            Detected Conflicts ({conflicts.length})
-          </h2>
-          {conflicts.length === 0 ? (
-            <div className="empty-state">
-              <BrainCircuit size={36} style={{ opacity:0.2 }} />
-              <p>Run analysis to see conflict predictions</p>
-            </div>
-          ) : (
-            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-              {conflicts.map((c) => (
-                <div key={c.conflict_id} className="card" style={{ padding:16, borderColor: c.severity === 'critical' ? 'var(--danger)' : c.severity === 'high' ? 'var(--warning)' : 'var(--border)' }}>
-                  <div className="flex items-center justify-between mb-4" style={{ marginBottom:10 }}>
-                    <span style={{
-                      fontSize:'0.72rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em',
-                      padding:'3px 10px', borderRadius:999,
-                      background: c.severity === 'critical' ? 'rgba(239,68,68,0.15)' : c.severity === 'high' ? 'rgba(245,158,11,0.15)' : 'rgba(107,114,128,0.15)',
-                      color: c.severity === 'critical' ? 'var(--danger)' : c.severity === 'high' ? 'var(--warning)' : 'var(--text-muted)',
-                    }}>
-                      {c.severity}
-                    </span>
-                    <span className="text-xs text-muted font-mono">{c.conflict_id}</span>
-                  </div>
-                  <div style={{ fontSize:'0.9rem', fontWeight:500, marginBottom:6 }}>
-                    {c.type.replace('_', ' ').toUpperCase()} — Section: <strong>{c.section}</strong>
-                  </div>
-                  <div className="text-sm text-muted">
-                    Trains: <span className="font-mono">{c.trains?.join(', ')}</span>
-                  </div>
-                  {c.predicted_in_seconds > 0 && (
-                    <div className="text-sm" style={{ marginTop:4, color:'var(--warning)' }}>
-                      ⏱ Predicted in {Math.round(c.predicted_in_seconds)}s
-                    </div>
-                  )}
+      {/* Conflict detail */}
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize:'1rem', fontWeight:600, marginBottom:12 }}>
+          Detected Conflicts ({conflicts.length})
+        </h2>
+        {conflicts.length === 0 ? (
+          <div className="empty-state">
+            <BrainCircuit size={36} style={{ opacity:0.2 }} />
+            <p>Run analysis to see conflict predictions</p>
+          </div>
+        ) : (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:12 }}>
+            {conflicts.map((c) => (
+              <div key={c.conflict_id} className="card" style={{ padding:16, borderColor: c.severity === 'critical' ? 'var(--danger)' : c.severity === 'high' ? 'var(--warning)' : 'var(--border)' }}>
+                <div className="flex items-center justify-between mb-4" style={{ marginBottom:10 }}>
+                  <span style={{
+                    fontSize:'0.72rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em',
+                    padding:'3px 10px', borderRadius:999,
+                    background: c.severity === 'critical' ? 'rgba(239,68,68,0.15)' : c.severity === 'high' ? 'rgba(245,158,11,0.15)' : 'rgba(107,114,128,0.15)',
+                    color: c.severity === 'critical' ? 'var(--danger)' : c.severity === 'high' ? 'var(--warning)' : 'var(--text-muted)',
+                  }}>
+                    {c.severity}
+                  </span>
+                  <span className="text-xs text-muted font-mono">{c.conflict_id}</span>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <SolutionPanel />
+                <div style={{ fontSize:'0.9rem', fontWeight:500, marginBottom:6 }}>
+                  {c.type.replace('_', ' ').toUpperCase()} — Section: <strong>{c.section}</strong>
+                </div>
+                <div className="text-sm text-muted">
+                  Trains: <span className="font-mono">{c.trains?.join(', ')}</span>
+                </div>
+                {c.predicted_in_seconds > 0 && (
+                  <div className="text-sm" style={{ marginTop:4, color:'var(--warning)' }}>
+                    ⏱ Predicted in {Math.round(c.predicted_in_seconds)}s
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Solutions — full width below conflicts */}
+      <SolutionPanel />
     </div>
   )
 }

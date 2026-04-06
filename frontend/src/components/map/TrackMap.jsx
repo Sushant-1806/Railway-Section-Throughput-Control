@@ -8,16 +8,14 @@
  *   3. On each backend tick, the frontend's target is updated; between ticks
  *      the frontend extrapolates movement based on train speed
  *
- * This produces buttery-smooth continuous movement that stays in sync with
- * the server, like a real-time strategy game.
- *
  * Features:
- *   - Continuous train movement along computed paths
+ *   - Continuous train movement along computed paths (slowed for operator use)
  *   - Direction arrows showing heading
  *   - Speed + status labels on each train
  *   - Collision ETA countdowns at conflict zones
  *   - Pulsing severity rings on conflicts
  *   - Movement trail polylines
+ *   - Trains HALT at conflict location
  *   - Trains resume after being stopped (conflict cleared)
  */
 
@@ -35,30 +33,33 @@ const IDLE_FRAME_INTERVAL = 250 // ~4fps when sim is off
 
 /**
  * How quickly the frontend lerps toward backend position.
- * Higher = snappier corrections. 0.08 gives a smooth ~200ms blend.
+ * Higher = snappier corrections, lower = smoother but more lag.
+ * 0.12 gives a smooth ~150ms blend that tracks the backend well.
  */
-const LERP_FACTOR = 0.08
+const LERP_FACTOR = 0.12
 
 /**
  * Frontend extrapolation speed factor — matches the backend's
- * SIM_TIME_MULTIPLIER (600) so visual speed = backend speed.
+ * SIM_TIME_MULTIPLIER (60) so visual speed = backend speed.
+ * Both sides are in sync → buttery smooth movement.
  */
-const EXTRAP_SPEED_FACTOR = 600
+const EXTRAP_SPEED_FACTOR = 60
 
 const TYPE_COLORS = {
-  Express:   '#3b82f6',
+  Express: '#3b82f6',
   Passenger: '#22c55e',
-  Freight:   '#f59e0b',
-  Local:     '#a78bfa',
+  Freight: '#f59e0b',
+  Local: '#a78bfa',
 }
 
 const STATUS_STROKE = {
-  active:        '#22c55e',
-  stopped:       '#ef4444',
+  active: '#22c55e',
+  stopped: '#ef4444',
   speed_reduced: '#f59e0b',
-  rerouted:      '#06b6d4',
-  conflict:      '#ef4444',
-  arrived:       '#10b981',
+  rerouted: '#06b6d4',
+  conflict: '#ef4444',
+  arrived: '#10b981',
+  resuming: '#22c55e',
 }
 
 const STATUS_LABELS = {
@@ -67,7 +68,8 @@ const STATUS_LABELS = {
   speed_reduced: 'SLOW',
   rerouted: 'DETOUR',
   arrived: 'ARRIVED',
-  conflict: 'ALERT',
+  conflict: '⚠ CONFLICT',
+  resuming: '▶ RESUMING',
 }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
@@ -124,7 +126,6 @@ function shortestPath(source, target, adjacency) {
 
 /**
  * Build a renderable geometry object for a path through the node map.
- * Contains segments with pixel positions and cumulative distances.
  */
 function buildGeometry(path, nodeMap, edgeLookup) {
   const fallback = path.length > 0 && nodeMap[path[0]]
@@ -183,26 +184,20 @@ export default function TrackMap() {
   const trainsRef = useRef([])
   const conflictsRef = useRef([])
   const conflictIdsRef = useRef(new Set())
+  const crashedIdsRef = useRef(new Set())
+  const resumingIdsRef = useRef(new Set())
   const simRunningRef = useRef(false)
   const trailsRef = useRef(new Map()) // train_id -> [{x,y}]
 
   /**
    * motionRef — per-train animation state, keyed by train_id.
-   *   geometry       – computed full path geometry (origin → destination)
-   *   displayProgress– 0.0 … 1.0 the FRONTEND's current interpolated position
-   *   targetProgress – 0.0 … 1.0 the BACKEND's last reported position
-   *   origin         – starting station (used to build full-path geometry)
-   *   destination    – cached; triggers new geometry when it changes
-   *   speed          – last known speed (km/h) for extrapolation
-   *   status         – last known status
-   *   lastFrameTime  – for computing delta-ms each frame
-   *   lastBackendTime– when we last got a backend update (for extrapolation)
    */
   const motionRef = useRef(new Map())
   const pathCacheRef = useRef(new Map())
 
   // ── Zustand selectors ─────────────────────────────────────────────────
-  const { networkNodes, networkEdges, currentTrains, conflicts, simulationRunning } = useRailwayStore()
+  const { networkNodes, networkEdges, currentTrains, conflicts, simulationRunning,
+    crashedTrainIds, resumingTrainIds, addCrashedTrains } = useRailwayStore()
 
   const nodeMap = useMemo(() => Object.fromEntries(networkNodes.map((n) => [n.id, n])), [networkNodes])
   const adjacency = useMemo(() => buildAdjacency(networkEdges), [networkEdges])
@@ -217,7 +212,18 @@ export default function TrackMap() {
   useEffect(() => { trainsRef.current = currentTrains }, [currentTrains])
   useEffect(() => { conflictsRef.current = conflicts }, [conflicts])
   useEffect(() => { conflictIdsRef.current = conflictTrainIds }, [conflictTrainIds])
+  useEffect(() => { crashedIdsRef.current = crashedTrainIds }, [crashedTrainIds])
+  useEffect(() => { resumingIdsRef.current = resumingTrainIds }, [resumingTrainIds])
   useEffect(() => { simRunningRef.current = simulationRunning }, [simulationRunning])
+
+  // Mark trains as crashed when conflicts are detected
+  useEffect(() => {
+    if (conflicts.length > 0 && simulationRunning) {
+      const ids = []
+      conflicts.forEach((c) => c.trains?.forEach((t) => ids.push(t)))
+      if (ids.length > 0) addCrashedTrains(ids)
+    }
+  }, [conflicts, simulationRunning, addCrashedTrains])
 
   // Clear caches when topology changes
   useEffect(() => {
@@ -342,13 +348,18 @@ export default function TrackMap() {
       const liveTrains = trainsRef.current
       const liveConflicts = conflictsRef.current || []
       const cIds = conflictIdsRef.current
+      const crashed = crashedIdsRef.current
+      const resuming = resumingIdsRef.current
 
       /* ── Compute train positions ──────────────────────────────────── */
       const rendered = liveTrains.map((train, idx) => {
         let mot = motionRef.current.get(train.train_id)
         const speed = Number(train.current_speed) || 0
         const status = train.status || 'active'
-        const isStopped = status === 'stopped' || status === 'arrived' || speed <= 0
+        const isCrashed = crashed.has(train.train_id)
+        const isResuming = resuming.has(train.train_id)
+        const isConflict = cIds.has(train.train_id)
+        const isStopped = status === 'stopped' || status === 'arrived' || speed <= 0 || isCrashed
         const backendProgress = Number(train.path_progress) || 0
         const origin = train.origin || train.current_section
 
@@ -375,7 +386,6 @@ export default function TrackMap() {
         }
 
         // ── Update target from backend ─────────────────────────────
-        // Detect new backend data: backend progress changed
         if (backendProgress !== mot.lastBackendProgress || speed !== mot.speed || status !== mot.status) {
           mot.targetProgress = backendProgress
           mot.lastBackendTime = now
@@ -388,7 +398,9 @@ export default function TrackMap() {
         const deltaMs = clamp(now - mot.lastFrameTime, 0, 200) // cap to avoid jumps after tab-switch
         mot.lastFrameTime = now
 
-        if (isSimRunning && !isStopped && mot.geometry.totalDistance > 0 && deltaMs > 0) {
+        if (isCrashed) {
+          // HALTED at conflict: freeze position — do not advance
+        } else if (isSimRunning && !isStopped && mot.geometry.totalDistance > 0 && deltaMs > 0) {
           // Extrapolate: move forward at the train's speed
           const kmPerMs = (speed / 3_600_000) * EXTRAP_SPEED_FACTOR
           const extrapolatedDelta = (kmPerMs * deltaMs) / mot.geometry.totalDistance
@@ -398,7 +410,6 @@ export default function TrackMap() {
           mot.displayProgress = lerp(mot.displayProgress, extrapolatedTarget, LERP_FACTOR)
 
           // Also advance the target slightly so we don't fall behind
-          // (between backend ticks, the frontend should keep moving)
           const timeSinceBackend = now - mot.lastBackendTime
           if (timeSinceBackend > 100) { // 100ms grace before extrapolating past backend
             const extrapolation = (kmPerMs * timeSinceBackend) / mot.geometry.totalDistance
@@ -408,7 +419,7 @@ export default function TrackMap() {
 
           // Hard clamp to not overshoot
           mot.displayProgress = clamp(mot.displayProgress, 0, 1)
-        } else if (isStopped) {
+        } else if (isStopped && !isCrashed) {
           // When stopped, gently ease to the backend's reported position
           mot.displayProgress = lerp(mot.displayProgress, mot.targetProgress, 0.12)
         }
@@ -421,7 +432,7 @@ export default function TrackMap() {
 
         // Trail
         let trail = trailsRef.current.get(train.train_id) || []
-        const shouldAnimate = isSimRunning && !isStopped && mot.geometry.totalDistance > 0
+        const shouldAnimate = isSimRunning && !isStopped && !isCrashed && mot.geometry.totalDistance > 0
         if (shouldAnimate) {
           const last = trail[trail.length - 1]
           if (!last || Math.hypot(pos.x - last.x, pos.y - last.y) > 2) {
@@ -430,18 +441,34 @@ export default function TrackMap() {
           }
         }
 
-        const isConflict = cIds.has(train.train_id)
         const color = TYPE_COLORS[train.train_type] || '#94a3b8'
-        const aura = isConflict
+
+        // Determine visual status
+        let visualLabel, visualStroke
+        if (isCrashed) {
+          visualLabel = STATUS_LABELS.conflict
+          visualStroke = STATUS_STROKE.conflict
+        } else if (isResuming) {
+          visualLabel = STATUS_LABELS.resuming
+          visualStroke = STATUS_STROKE.resuming
+        } else if (isConflict) {
+          visualLabel = STATUS_LABELS.conflict
+          visualStroke = STATUS_STROKE.conflict
+        } else {
+          visualLabel = STATUS_LABELS[status] || 'MOVING'
+          visualStroke = STATUS_STROKE[status] || STATUS_STROKE.active
+        }
+
+        const aura = (isCrashed || isConflict)
           ? 0.45 + 0.2 * Math.sin(now / 160 + idx)
           : shouldAnimate ? 0.22 + 0.1 * Math.sin(now / 500 + idx) : 0.08
 
         return {
-          ...train, speed, status, isStopped, shouldAnimate, isConflict,
+          ...train, speed, status, isStopped, shouldAnimate, isConflict, isCrashed, isResuming,
           x: pos.x, y: pos.y, angle: pos.angle, trail, color, aura,
           progress: mot.displayProgress,
-          stroke: isConflict ? STATUS_STROKE.conflict : STATUS_STROKE[status] || STATUS_STROKE.active,
-          label: isConflict ? STATUS_LABELS.conflict : STATUS_LABELS[status] || 'MOVING',
+          stroke: visualStroke,
+          label: visualLabel,
         }
       })
 
@@ -476,21 +503,22 @@ export default function TrackMap() {
 
       // Aura
       merged.select('.ta')
-        .attr('stroke', (d) => d.isConflict ? '#ef4444' : d.color)
+        .attr('stroke', (d) => (d.isCrashed || d.isConflict) ? '#ef4444' : d.color)
         .attr('opacity', (d) => d.aura)
-        .attr('r', (d) => d.isConflict ? 20 + 2 * Math.sin(now / 200) : 18)
-        .attr('filter', (d) => d.isConflict ? 'url(#conflict-glow)' : 'url(#glow)')
+        .attr('r', (d) => (d.isCrashed || d.isConflict) ? 20 + 2 * Math.sin(now / 200) : 18)
+        .attr('filter', (d) => (d.isCrashed || d.isConflict) ? 'url(#conflict-glow)' : 'url(#glow)')
 
       // Body
       merged.select('.tb')
         .attr('fill', (d) => d.color)
         .attr('fill-opacity', (d) => d.isStopped ? 0.25 : 0.22)
-        .attr('stroke', (d) => d.stroke).attr('stroke-width', (d) => d.isConflict ? 3 : 2)
+        .attr('stroke', (d) => d.stroke).attr('stroke-width', (d) => (d.isCrashed || d.isConflict) ? 3 : 2)
         .attr('filter', 'url(#glow)')
 
       // Core
       merged.select('.tc')
-        .attr('fill', (d) => d.color).attr('opacity', (d) => d.isStopped ? 0.45 : 1)
+        .attr('fill', (d) => d.isResuming ? '#22c55e' : d.color)
+        .attr('opacity', (d) => d.isStopped ? 0.45 : 1)
 
       // Direction arrow
       merged.select('.td')
@@ -510,10 +538,10 @@ export default function TrackMap() {
 
       // Status
       merged.select('.tst').attr('text-anchor', 'middle').attr('dy', '-24px')
-        .attr('fill', (d) => d.isConflict ? '#ef4444' : d.isStopped ? '#f59e0b' : 'var(--map-legend-text)')
+        .attr('fill', (d) => (d.isCrashed || d.isConflict) ? '#ef4444' : d.isResuming ? '#22c55e' : d.isStopped ? '#f59e0b' : 'var(--map-legend-text)')
         .attr('font-size', '8px').attr('font-family', 'JetBrains Mono, monospace')
         .attr('font-weight', 700).attr('letter-spacing', '0.05em')
-        .attr('opacity', (d) => d.isConflict ? 0.7 + 0.3 * Math.sin(now / 280) : 0.7)
+        .attr('opacity', (d) => (d.isCrashed || d.isConflict) ? 0.7 + 0.3 * Math.sin(now / 280) : 0.7)
         .text((d) => d.label)
 
       // Train ID

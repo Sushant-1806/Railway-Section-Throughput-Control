@@ -34,6 +34,26 @@ const useRailwayStore = create((set, get) => ({
   simulationRunning: false,
   setSimulationRunning: (val) => set({ simulationRunning: val }),
 
+  // ── Conflict tracking ──────────────────────────────────────────────────────
+  crashedTrainIds: new Set(),
+  resumingTrainIds: new Set(),
+  addCrashedTrains: (ids) => set((s) => {
+    const next = new Set(s.crashedTrainIds)
+    ids.forEach((id) => next.add(id))
+    return { crashedTrainIds: next }
+  }),
+  clearCrashedTrains: (ids) => set((s) => {
+    const nextCrashed = new Set(s.crashedTrainIds)
+    const nextResuming = new Set(s.resumingTrainIds)
+    ids.forEach((id) => { nextCrashed.delete(id); nextResuming.add(id) })
+    return { crashedTrainIds: nextCrashed, resumingTrainIds: nextResuming }
+  }),
+  clearResumingTrains: (ids) => set((s) => {
+    const next = new Set(s.resumingTrainIds)
+    ids.forEach((id) => next.delete(id))
+    return { resumingTrainIds: next }
+  }),
+
   // ── Network graph ─────────────────────────────────────────────────────────
   networkNodes: [],
   networkEdges: [],

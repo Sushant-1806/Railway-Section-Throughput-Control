@@ -1,19 +1,22 @@
 /**
- * pages/MapPage.jsx — Full-screen tactical track map with live controls and status HUD.
+ * pages/MapPage.jsx — Full-screen tactical track map with live controls,
+ * status HUD, and inline AI solutions panel.
  */
 
 import { useEffect } from 'react'
-import { Map, Play, Square, Activity, AlertTriangle, Pause } from 'lucide-react'
+import { Map, Play, Square, Activity, AlertTriangle, Pause, BrainCircuit } from 'lucide-react'
 import toast from 'react-hot-toast'
 import useRailwayStore from '../store/railwayStore'
 import { useSocket } from '../hooks/useSocket'
 import * as api from '../services/api'
 import TrackMap from '../components/map/TrackMap'
+import SolutionPanel from '../components/solutions/SolutionPanel'
 
 export default function MapPage() {
   const {
     currentScenarioId, simulationRunning, conflicts, currentTrains,
     setNetwork, networkNodes, setSimulationRunning,
+    isAnalyzing, setAnalyzing, setAnalysisResult,
   } = useRailwayStore()
 
   useSocket(currentScenarioId)
@@ -50,6 +53,24 @@ export default function MapPage() {
     }
   }
 
+  const handleAnalyze = async () => {
+    if (!currentTrains.length) return toast.error('No trains loaded')
+    setAnalyzing(true)
+    try {
+      const r = await api.analyzeTraffic(currentTrains)
+      setAnalysisResult(r.data.conflicts, r.data.solutions)
+      if (r.data.conflicts.length === 0) {
+        toast.success('✅ No conflicts detected!')
+      } else {
+        toast.error(`⚠️ ${r.data.conflicts.length} conflict(s) detected`)
+      }
+    } catch {
+      toast.error('Analysis failed')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
   const activeTrains = currentTrains.filter((t) => t.status === 'active' || t.status === 'speed_reduced' || t.status === 'rerouted').length
   const stoppedTrains = currentTrains.filter((t) => t.status === 'stopped').length
   const arrivedTrains = currentTrains.filter((t) => t.status === 'arrived').length
@@ -68,6 +89,17 @@ export default function MapPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={handleAnalyze}
+            disabled={!currentTrains.length || isAnalyzing}
+            title="Analyze traffic for conflicts"
+          >
+            {isAnalyzing
+              ? <><span className="spinner" style={{width:14,height:14,borderWidth:2}}/> Analyzing…</>
+              : <><BrainCircuit size={14}/> Analyze</>
+            }
+          </button>
           {!simulationRunning ? (
             <button className="btn btn-success btn-sm" onClick={handleStartSim}>
               <Play size={14}/> Start Simulation
@@ -142,6 +174,11 @@ export default function MapPage() {
       </div>
 
       <TrackMap />
+
+      {/* AI Solutions panel — below the map for operator quick access */}
+      <div style={{ marginTop: 16 }}>
+        <SolutionPanel />
+      </div>
     </div>
   )
 }

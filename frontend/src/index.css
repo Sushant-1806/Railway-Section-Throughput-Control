@@ -169,6 +169,10 @@ body {
   border-right: 1px solid var(--border);
   padding: 20px 0;
   overflow-y: auto;
+  position: sticky;
+  top: 60px;
+  height: calc(100vh - 60px);
+  align-self: start;
 }
 
 .app-layout .main {
@@ -1016,6 +1020,10 @@ h1, h2, h3, h4, .topbar-logo, .login-logo h1, .card-title {
   background: var(--bg-surface);
   border-right: 1px solid var(--border);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
+  position: sticky;
+  top: 60px;
+  height: calc(100vh - 60px);
+  align-self: start;
 }
 
 .app-layout .main {
@@ -1350,3 +1358,186 @@ h1, h2, h3, h4, .topbar-logo, .login-logo h1, .card-title {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ── Compact Solutions Panel ─────────────────────────────────────────────── */
+.solutions-panel {
+  padding: 16px;
+}
+
+.solutions-panel-empty {
+  padding: 16px;
+}
+
+.solutions-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+
+.solutions-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary-glow);
+  color: var(--primary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.solutions-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.solutions-apply-btn {
+  padding: 5px 14px !important;
+  font-size: 0.78rem !important;
+  animation: applyPulse 2s ease-in-out infinite;
+}
+
+@keyframes applyPulse {
+  0%, 100% { box-shadow: 0 2px 12px rgba(79, 140, 255, 0.4); }
+  50%      { box-shadow: 0 4px 20px rgba(79, 140, 255, 0.7); }
+}
+
+.solutions-compact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.solution-compact-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.solution-compact-card:hover {
+  border-color: var(--primary);
+  background: var(--surface-elevated);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.solution-compact-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-glow);
+  box-shadow: 0 0 0 1px var(--primary), var(--shadow-sm);
+}
+
+.solution-compact-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.solution-compact-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.solution-compact-conf {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.solution-check {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.solution-compact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.solution-compact-action {
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.solution-compact-action.muted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.solution-compact-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.solution-compact-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  max-width: 280px;
+  width: max-content;
+  box-shadow: var(--shadow-lg);
+  z-index: 50;
+  pointer-events: none;
+  line-height: 1.5;
+}
+
+.solution-compact-tooltip strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+}
+
+.solution-compact-tooltip p {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.solution-compact-card:hover .solution-compact-tooltip {
+  display: block;
+}
+

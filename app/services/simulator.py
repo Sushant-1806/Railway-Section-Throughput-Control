@@ -23,7 +23,7 @@ from app.services import ai_engine
 logger = logging.getLogger(__name__)
 
 TICK_SECONDS = 0.5           # real-world seconds between ticks (2 ticks/sec for smoother updates)
-SIM_TIME_MULTIPLIER = 600    # each tick simulates 600x real seconds (demo speed)
+SIM_TIME_MULTIPLIER = 60     # each tick simulates 60x real seconds (slower for operator use)
 RESTART_DELAY_TICKS = 2      # ticks to wait after conflict clears before restarting
 
 # ── In-memory state (keyed by scenario_id) ────────────────────────────────────
