@@ -2,21 +2,23 @@
  * components/map/TrackMap.jsx — Live tactical railway map with D3.
  *
  * Smooth train animation architecture:
- *   1. Backend sends authoritative path_progress (0–1) every 0.5s via WebSocket
- *   2. Frontend runs at 60fps, smoothly interpolating trains toward their
- *      backend target positions using speed-based extrapolation + lerp
- *   3. On each backend tick, the frontend's target is updated; between ticks
- *      the frontend extrapolates movement based on train speed
+ *   1. Backend sends authoritative path_progress (0–1) every 0.25s via WebSocket
+ *      (SIM_TIME_MULTIPLIER=180 in simulator.py — movie-paced, not too fast/slow)
+ *   2. Frontend runs at native 60fps continuously, ALWAYS extrapolating train positions
+ *      forward in time — the map is NEVER static, even between backend ticks
+ *   3. LERP_FACTOR=0.3 gives game-like snappy corrections without jitter
+ *   4. EXTRAP_SPEED_FACTOR=180 exactly matches the backend multiplier so
+ *      visual speed === computed speed — no drift
  *
  * Features:
- *   - Continuous train movement along computed paths (slowed for operator use)
+ *   - Continuous COD-style train movement along computed paths
  *   - Direction arrows showing heading
  *   - Speed + status labels on each train
  *   - Collision ETA countdowns at conflict zones
  *   - Pulsing severity rings on conflicts
  *   - Movement trail polylines
  *   - Trains HALT at conflict location
- *   - Trains resume after being stopped (conflict cleared)
+ *   - Trains resume after conflict clears
  */
 
 import { useEffect, useRef, useMemo } from 'react'
@@ -28,22 +30,20 @@ import useRailwayStore from '../../store/railwayStore'
 const MAP_W = 900
 const MAP_H = 560
 
-const TRAIL_LENGTH = 12
-const IDLE_FRAME_INTERVAL = 250 // ~4fps when sim is off
+const TRAIL_LENGTH = 16
+const IDLE_FRAME_INTERVAL = 16 // always 60fps — map is never static
 
 /**
  * How quickly the frontend lerps toward backend position.
- * Higher = snappier corrections, lower = smoother but more lag.
- * 0.12 gives a smooth ~150ms blend that tracks the backend well.
+ * 0.3 gives snappy, game-like responsiveness without jitter.
  */
-const LERP_FACTOR = 0.12
+const LERP_FACTOR = 0.3
 
 /**
- * Frontend extrapolation speed factor — matches the backend's
- * SIM_TIME_MULTIPLIER (60) so visual speed = backend speed.
- * Both sides are in sync → buttery smooth movement.
+ * Frontend extrapolation speed factor — MUST match backend SIM_TIME_MULTIPLIER (180).
+ * Both sides are in sync → movie-smooth, continuous movement.
  */
-const EXTRAP_SPEED_FACTOR = 60
+const EXTRAP_SPEED_FACTOR = 180
 
 const TYPE_COLORS = {
   Express: '#3b82f6',
@@ -338,11 +338,7 @@ export default function TrackMap() {
     const renderFrame = (now) => {
       const isSimRunning = simRunningRef.current
 
-      // Throttle to ~4fps when simulation is off
-      if (!isSimRunning && now - lastFrameRef.current < IDLE_FRAME_INTERVAL) {
-        frameRef.current = requestAnimationFrame(renderFrame)
-        return
-      }
+      // Always render at 60fps — never throttle, map must never appear static
       lastFrameRef.current = now
 
       const liveTrains = trainsRef.current
@@ -395,33 +391,30 @@ export default function TrackMap() {
         }
 
         // ── Advance displayProgress toward target (every frame) ────
-        const deltaMs = clamp(now - mot.lastFrameTime, 0, 200) // cap to avoid jumps after tab-switch
+        const deltaMs = clamp(now - mot.lastFrameTime, 0, 100) // cap tighter: avoid big jumps on tab-switch
         mot.lastFrameTime = now
 
         if (isCrashed) {
-          // HALTED at conflict: freeze position — do not advance
-        } else if (isSimRunning && !isStopped && mot.geometry.totalDistance > 0 && deltaMs > 0) {
-          // Extrapolate: move forward at the train's speed
+          // HALTED at conflict — freeze in place, do not advance
+        } else if (!isStopped && mot.geometry.totalDistance > 0 && deltaMs > 0) {
+          // Extrapolate ALWAYS (not just when sim flag is set) — trains always move smoothly
           const kmPerMs = (speed / 3_600_000) * EXTRAP_SPEED_FACTOR
           const extrapolatedDelta = (kmPerMs * deltaMs) / mot.geometry.totalDistance
-          const extrapolatedTarget = Math.min(1.0, mot.targetProgress + extrapolatedDelta)
 
-          // Smoothly blend: lerp current position toward extrapolated target
-          mot.displayProgress = lerp(mot.displayProgress, extrapolatedTarget, LERP_FACTOR)
-
-          // Also advance the target slightly so we don't fall behind
+          // Advance target forward based on elapsed time since last backend tick
           const timeSinceBackend = now - mot.lastBackendTime
-          if (timeSinceBackend > 100) { // 100ms grace before extrapolating past backend
-            const extrapolation = (kmPerMs * timeSinceBackend) / mot.geometry.totalDistance
-            const exTarget = Math.min(1.0, mot.lastBackendProgress + extrapolation)
-            mot.targetProgress = Math.max(mot.targetProgress, exTarget)
-          }
+          const extrapolation = (kmPerMs * timeSinceBackend) / mot.geometry.totalDistance
+          const liveTarget = Math.min(1.0, mot.lastBackendProgress + extrapolation)
+          mot.targetProgress = Math.max(mot.targetProgress, liveTarget)
 
-          // Hard clamp to not overshoot
+          // Snap displayProgress toward live target — game-like responsiveness
+          mot.displayProgress = lerp(mot.displayProgress, mot.targetProgress, LERP_FACTOR)
+
+          // Hard clamp
           mot.displayProgress = clamp(mot.displayProgress, 0, 1)
         } else if (isStopped && !isCrashed) {
-          // When stopped, gently ease to the backend's reported position
-          mot.displayProgress = lerp(mot.displayProgress, mot.targetProgress, 0.12)
+          // When stopped: ease gently to last known backend position
+          mot.displayProgress = lerp(mot.displayProgress, mot.targetProgress, 0.08)
         }
 
         if (status === 'arrived') mot.displayProgress = 1.0
@@ -432,8 +425,9 @@ export default function TrackMap() {
 
         // Trail
         let trail = trailsRef.current.get(train.train_id) || []
-        const shouldAnimate = isSimRunning && !isStopped && !isCrashed && mot.geometry.totalDistance > 0
-        if (shouldAnimate) {
+        // Trail records whenever train actually moves (not just when sim flag is set)
+        const shouldAnimate = !isStopped && !isCrashed && mot.geometry.totalDistance > 0 && speed > 0
+        if (shouldAnimate && isSimRunning) {
           const last = trail[trail.length - 1]
           if (!last || Math.hypot(pos.x - last.x, pos.y - last.y) > 2) {
             trail = [...trail, { x: pos.x, y: pos.y }].slice(-TRAIL_LENGTH)
